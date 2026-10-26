@@ -1,0 +1,873 @@
+"""
+proj-publisher — 主窗口 UI (Phase 1)
+
+基于 ui-code.txt / ui-design.txt / ui-setting.txt 搭建完整界面。
+包含：APP_STYLE、MainWindow 类、参数收集方法、占位槽函数。
+"""
+
+from __future__ import annotations
+
+import sys
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QSizePolicy
+from PySide6.QtGui import QFont, QFontMetrics, QGuiApplication
+from PySide6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
+    QSplitter, QGroupBox, QLabel, QPushButton, QRadioButton,
+    QButtonGroup, QLineEdit, QTextEdit, QFileDialog,
+    QComboBox, QCheckBox, QStatusBar, QFrame,
+    QGridLayout,
+)
+
+# ---------------------------------------------------------------------------
+# 从 models 导入所有选项和默认值常量
+# ---------------------------------------------------------------------------
+from models import (
+    STYLE_OPTIONS, SCENE_OPTIONS, AUDIENCE_OPTIONS,
+    LENGTH_STRATEGY_OPTIONS, LANGUAGE_OPTIONS, TONE_OPTIONS,
+    STRUCTURE_MODE_OPTIONS,
+    DEFAULT_WORD_COUNT_MIN, DEFAULT_WORD_COUNT_MAX,
+    DEFAULT_STYLE, DEFAULT_SCENE, DEFAULT_AUDIENCE,
+    DEFAULT_LENGTH_STRATEGY, DEFAULT_LANGUAGE, DEFAULT_TONE,
+    DEFAULT_STRUCTURE_MODE,
+)
+
+# ---------------------------------------------------------------------------
+# 中文显示标签 ↔ 英文值映射表（供 Radio/Combo 读写使用）
+# ---------------------------------------------------------------------------
+
+LABEL_MAP = {
+    "style":         ["新闻稿", "报道稿", "科普稿", "规范稿"],
+    "scene":         ["对外发布", "内部汇报", "学习材料", "政策参考"],
+    "audience":      ["普通公众", "行业同行", "市场消费", "专业人员", "政策人员"],
+    "length_strategy":["压缩优先", "平衡", "扩写优先"],
+    "language":      ["中文", "英文"],
+    "tone":          ["正式", "中性", "通俗", "生动", "文学化", "幽默"],
+    "structure_mode":["保留原结构", "优化结构", "重组结构"],
+}
+
+OPTIONS_MAP = {
+    "style":         STYLE_OPTIONS,
+    "scene":         SCENE_OPTIONS,
+    "audience":      AUDIENCE_OPTIONS,
+    "length_strategy":LENGTH_STRATEGY_OPTIONS,
+    "language":      LANGUAGE_OPTIONS,
+    "tone":          TONE_OPTIONS,
+    "structure_mode":STRUCTURE_MODE_OPTIONS,
+}
+
+
+def _get_option_value(field: str, combo: QComboBox) -> str:
+    """通过 combo 的选中索引从 OPTIONS_MAP 中取真实英文值。"""
+    return OPTIONS_MAP[field][combo.currentIndex()]
+
+# ---------------------------------------------------------------------------
+# APP_STYLE — 全局样式表
+# ---------------------------------------------------------------------------
+APP_STYLE = """
+QWidget {
+    background: #EEEEEE;
+    color: #1F2937;
+    font-family: 'Noto Sans';
+    font-size: 9pt;
+}
+
+QGroupBox {
+    background: transparent;
+    border: 1px solid #DDE3EA;
+    border-radius: 8pt;
+    margin-top: 8pt;
+    padding: 8pt;
+}
+
+QLabel {
+    background: transparent;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 10pt;
+    padding: 0 4pt;
+    font-size: 7pt;
+}
+
+QLineEdit, QTextEdit, QComboBox, QSpinBox {
+    background: #FFFFFF;
+    border: 1px solid #DDE3EA;
+    border-radius: 6pt;
+    padding: 4pt 8pt;
+    selection-background-color: #EAF2FF;
+    min-height: 30pt;
+}
+
+QComboBox::drop-down {
+    background: #FFFFFF;
+}
+
+QComboBox::down-arrow {
+    image: none;
+    border: none;
+}
+
+QTextEdit {
+    min-height: auto;
+}
+
+QLineEdit:focus, QTextEdit:focus, QComboBox:focus, QSpinBox:focus {
+    border: 1px solid #4C78A8;
+}
+
+QPushButton {
+    background: #FFFFFF;
+    border: 1px solid #DDE3EA;
+    border-radius: 6pt;
+    padding: 6pt 12pt;
+    min-height: 30pt;
+}
+
+QPushButton:hover {
+    background: #EEF4FB;
+}
+
+QPushButton#primaryButton {
+    background: #4C78A8;
+    color: white;
+    border: none;
+}
+
+QPushButton#primaryButton:hover {
+    background: #3F6792;
+}
+
+QRadioButton {
+    spacing: 6pt;
+}
+
+QScrollBar:vertical {
+    width: 10pt;
+    background: #F7F9FC;
+    margin: 0px;
+}
+
+QScrollBar::handle:vertical {
+    background: #C9D4E3;
+    min-height: 24pt;
+    border-radius: 5pt;
+}
+
+QStatusBar {
+    background: #FFFFFF;
+    border-top: 1px solid #DDE3EA;
+}
+
+QMenuBar {
+    spacing: 6pt;
+}
+
+QMenuBar::item {
+    padding: 4pt 8pt;
+    spacing: 6pt;
+    background: transparent;
+}
+
+QMenuBar::item:selected {
+    background: #EEF4FB;
+}
+
+QToolBar {
+    spacing: 6pt;
+    border: none;
+    background: transparent;
+}
+
+QToolBar::separator {
+    width: 1px;
+    background: #DDE3EA;
+}
+"""
+
+
+class MainWindow(QMainWindow):
+    """文章改写工具主窗口。"""
+
+    def __init__(self):
+        super().__init__()
+
+        self.setWindowTitle("文章改写工具")
+        self.resize(1280, 720)
+        self.setMinimumSize(960, 540)
+        # --- HiDPI / 动态字体适配 ---
+        self._dpr = QGuiApplication.primaryScreen().devicePixelRatio()
+        font_size = 9 * self._dpr  # base pt x DPR -> effective px size
+        font = QFont("Noto Sans", round(font_size))
+        QApplication.setFont(font)
+
+        # --- FontMetrics-based layout constants (auto-scale with DPI/font) ---
+        fm = QFontMetrics(font)
+        fh = fm.height()            # rendered font height in px
+        self._margin = max(int(fh * 1.2), 8)       # ~96% of a typical line, min 8px
+        self._spacing = max(int(fh * 0.6), 4)      # ~56% of a typical line, min 4px
+
+        central = QWidget()
+        self.setCentralWidget(central)
+
+        root_layout = QVBoxLayout(central)
+        root_layout.setContentsMargins(self._margin, self._margin, self._margin, self._margin)
+        root_layout.setSpacing(self._spacing)
+
+        top_bar = self._build_top_bar()
+        root_layout.addWidget(top_bar)
+
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.setHandleWidth(8)
+
+        left_panel = self._build_left_panel()
+        right_panel = self._build_right_panel()
+
+        splitter.addWidget(left_panel)
+        splitter.addWidget(right_panel)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([360, 920])
+
+        root_layout.addWidget(splitter)
+
+        bottom_bar = self._build_bottom_bar()
+        root_layout.addWidget(bottom_bar)
+
+        self.setStatusBar(QStatusBar())
+        self._status = self.statusBar()
+        self.statusBar().showMessage("就绪")
+
+    # -----------------------------------------------------------------------
+    # T1.2 — 顶部操作栏
+    # -----------------------------------------------------------------------
+
+    def _build_top_bar(self):
+        """顶部占位条（保留布局间距，按钮已移至底部）。"""
+        frame = QFrame()
+        frame.setObjectName("topBar")
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(0, 0, 0, 0)
+        return frame
+
+    # -----------------------------------------------------------------------
+    # T1.3 — 左面板（输入源 + 参数 G1~G5）
+    # -----------------------------------------------------------------------
+
+    def _build_left_panel(self):
+        scroll = QFrame()
+        scroll.setFixedWidth(404)
+        layout = QVBoxLayout(scroll)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self._build_input_section(layout)
+        self._build_article_params(layout)
+
+        return scroll
+
+    # -----------------------------------------------------------------------
+    # T1.4 — 左侧输入源区域（纵向单选 + 行内控件）
+    # -----------------------------------------------------------------------
+
+    def _build_input_section(self, layout: QVBoxLayout):
+        # --- "输入来源"独立标题标签，紧贴框上方 ---
+        input_title = QLabel("输入来源")
+        input_title.setStyleSheet(
+            "QLabel { font-weight: bold; font-size: 10pt; padding-bottom: 2px; }"
+        )
+        layout.addWidget(input_title)
+
+        gb = QGroupBox("")
+        gb.setFlat(True)
+        outer = QVBoxLayout(gb)
+        outer.setSpacing(6)
+
+        # --- 纵向单选按钮组：网页链接 / 上传 PDF / 粘贴全文 ---
+        self.rb_url = QRadioButton("网页链接")
+        self.rb_url.setChecked(True)
+        self.rb_pdf = QRadioButton("上传 PDF")
+        self.rb_text = QRadioButton("粘贴全文")
+        input_group = QButtonGroup()
+        input_group.addButton(self.rb_url)
+        input_group.addButton(self.rb_pdf)
+        input_group.addButton(self.rb_text)
+
+        # --- 行内控件（与对应单选按钮并排） ---
+        self.url_edit = QLineEdit()
+        self.url_edit.setPlaceholderText("https://...")
+        btn_load_url = QPushButton("加载")
+        btn_load_url.setFixedWidth(60)
+
+        self.pdf_path = QLineEdit()
+        self.pdf_path.setPlaceholderText("选择 PDF 文件…")
+        self.pdf_path.setReadOnly(True)
+        self.btn_open_pdf = QPushButton("浏览")
+        self.btn_open_pdf.setFixedWidth(60)
+        self.cb_pdf_ocr = QCheckBox("OCR识别")
+
+        self.text_input = QTextEdit()
+        self.text_input.setPlaceholderText("在此粘贴全文…")
+        self.text_input.setMinimumHeight(120)
+
+        # --- 用垂直布局排列：每一行 = 单选按钮 + 控件 ---
+        input_rows = QVBoxLayout()
+        input_rows.setSpacing(4)
+        input_rows.setContentsMargins(8, 4, 0, 4)
+
+        # Row: 网页链接 + URL 输入框 + "加载"
+        url_row = QHBoxLayout()
+        url_row.setContentsMargins(0, 0, 0, 0)
+        url_row.setSpacing(6)
+        url_row.addWidget(self.rb_url)
+        url_row.addWidget(self.url_edit, stretch=1)
+        url_row.addWidget(btn_load_url)
+
+        # Row: 上传 PDF + 路径 + "打开" + OCR
+        pdf_row = QHBoxLayout()
+        pdf_row.setContentsMargins(0, 0, 0, 0)
+        pdf_row.setSpacing(6)
+        pdf_row.addWidget(self.rb_pdf)
+        pdf_row.addWidget(self.pdf_path, stretch=1)
+        pdf_row.addWidget(self.btn_open_pdf)
+        pdf_row.addWidget(self.cb_pdf_ocr)
+
+        # Row: 粘贴全文 + QTextEdit（跨全宽）
+        text_row = QHBoxLayout()
+        text_row.setContentsMargins(0, 0, 0, 0)
+        text_row.setSpacing(6)
+        text_row.addWidget(self.rb_text)
+        text_row.addStretch(1)
+
+        text_input_row = QHBoxLayout()
+        text_input_row.setContentsMargins(20, 0, 0, 0)
+        text_input_row.setSpacing(0)
+        text_input_row.addWidget(self.text_input, stretch=1)
+
+        input_rows.addLayout(url_row)
+        input_rows.addLayout(pdf_row)
+        input_rows.addLayout(text_row)
+        input_rows.addLayout(text_input_row)
+
+        outer.addLayout(input_rows)
+        layout.addWidget(gb)
+
+        self.rb_url.toggled.connect(self.update_input_mode)
+        self.rb_text.toggled.connect(self.update_input_mode)
+        self.rb_pdf.toggled.connect(self.update_input_mode)
+        self.btn_open_pdf.clicked.connect(self.choose_pdf)
+        btn_load_url.clicked.connect(self._load_url_placeholder)
+        self.update_input_mode()
+
+    def _load_url_placeholder(self):
+        """URL 加载占位（Phase-2）。"""
+        url = self.url_edit.text().strip()
+        if not url:
+            self._status.showMessage("请输入网页链接。")
+            return
+        self._status.showMessage(f"正在加载: {url} — Phase 2", 3000)
+
+    # -----------------------------------------------------------------------
+    # T1.5 — 统一「设置参数」区（G1~G5 合并）
+    #         内部用 QGroupBox + QLabel 分隔线区分，字段均为行内水平排列
+    # -----------------------------------------------------------------------
+
+    def _build_article_params(self, layout: QVBoxLayout):
+        """将 G1~G5 参数合并到一个 GroupBox 中"""
+        # --- "设置参数"独立标题标签，紧贴框上方 ---
+        params_title = QLabel("设置参数")
+        params_title.setStyleSheet(
+            "QLabel { font-weight: bold; font-size: 10pt; padding-bottom: 2px; }"
+        )
+        layout.addWidget(params_title)
+
+        gb = QGroupBox("")
+        gb.setFlat(True)
+        main_layout = QVBoxLayout(gb)
+        main_layout.setSpacing(10)
+
+        # ────────── helper: 统一 Combo 宽度（4个汉字 + 填充）及创建 ──────────
+        self_fm = QFontMetrics(self.font())
+        combo_width = int(self_fm.horizontalAdvance("中文标签") + 16)
+
+        def make_combo():
+            c = QComboBox()
+            c.setMinimumWidth(combo_width)
+            c.setMaximumWidth(combo_width)
+            return c
+
+        # ────────── helper: QLabel 宽度适配实际文本（+少量填充）────
+        _spacing = int(self_fm.horizontalAdvance("中中"))  # ≈2个汉字间距
+
+        def _make_label(title: str, width_pad: int = 6):
+            w = self_fm.horizontalAdvance(title)
+            lbl = QLabel(title)
+            #lbl.setMinimumWidth(w)
+            #lbl.setMaximumWidth(w + width_pad)
+            lbl.setFixedWidth(w + width_pad)    
+            lbl.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+            return lbl
+
+        # ────────── helper: 一行 "QLabel(标题) + QWidget(控件)" ──────────
+        def add_row(title: str, widget: QWidget, stretch_widget: int = 1):
+            row = QHBoxLayout()
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(_spacing)
+            lbl = _make_label(title)
+            row.addWidget(lbl)
+            row.addWidget(widget, stretch=stretch_widget)
+            main_layout.addLayout(row)
+
+        # ────────── helper: 双控件行 "QLabel + Widget | QLabel + Widget" ───────
+        def add_dual_row(title1: str, widget1: QWidget, title2: str, widget2: QWidget):
+            row = QHBoxLayout()
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(_spacing)
+            lbl1 = _make_label(title1)
+            lbl2 = _make_label(title2)
+            row.addWidget(lbl1)
+            row.addWidget(widget1)
+            row.addStretch(1)
+            row.addWidget(lbl2)
+            row.addWidget(widget2)
+            main_layout.addLayout(row)
+
+        # ────────── G1: 文体+使用场景 · 目标受众+长度策略 ──────────
+        self.style_combo = make_combo()
+        self.style_combo.addItems(LABEL_MAP["style"])
+        self.style_combo.setCurrentIndex(
+            OPTIONS_MAP["style"].index(DEFAULT_STYLE))
+
+        self.scene_combo = make_combo()
+        self.scene_combo.addItems(LABEL_MAP["scene"])
+        self.scene_combo.setCurrentIndex(
+            OPTIONS_MAP["scene"].index(DEFAULT_SCENE))
+        add_dual_row("文稿体裁", self.style_combo, "使用场景", self.scene_combo)
+
+        self.audience_combo = make_combo()
+        self.audience_combo.addItems(LABEL_MAP["audience"])
+        self.audience_combo.setCurrentIndex(
+            OPTIONS_MAP["audience"].index(DEFAULT_AUDIENCE))
+
+        # 长度策略与受众同行
+        self.length_combo = make_combo()
+        self.length_combo.addItems(LABEL_MAP["length_strategy"])
+        self.length_combo.setCurrentIndex(
+            OPTIONS_MAP["length_strategy"].index(DEFAULT_LENGTH_STRATEGY))
+        add_dual_row("目标受众", self.audience_combo, "长度策略", self.length_combo)
+
+        # 4-digit width for word count inputs (e.g. "9999")
+        wc_width = int(self_fm.horizontalAdvance("99999") )
+
+        # ────────── 文章结构 + 最低/最高字数（同行）──────────
+        struct_word_row = QHBoxLayout()
+        struct_word_row.setContentsMargins(0, 0, 0, 0)
+        struct_word_row.setSpacing(_spacing)
+
+        lbl_struct = _make_label("文章结构")
+        struct_word_row.addWidget(lbl_struct)
+
+        self.struct_combo = make_combo()
+        self.struct_combo.addItems(LABEL_MAP["structure_mode"])
+        self.struct_combo.setCurrentIndex(
+            OPTIONS_MAP["structure_mode"].index(DEFAULT_STRUCTURE_MODE))
+        struct_word_row.addWidget(self.struct_combo)
+
+        # 右侧：最低字数 / 最高字数
+        struct_word_row.addStretch(1)
+
+        lbl_min = _make_label("字数 min")
+        struct_word_row.addWidget(lbl_min)
+
+        self.word_count_min = QLineEdit()
+        self.word_count_min.setPlaceholderText("如 800")
+        self.word_count_min.setText(str(DEFAULT_WORD_COUNT_MIN))
+        self.word_count_min.setFixedWidth(wc_width)
+        from PySide6.QtCore import QRegularExpression
+        from PySide6.QtGui import QRegularExpressionValidator
+        wc_validator = QRegularExpressionValidator(QRegularExpression(r"^\d{1,5}$"))
+        self.word_count_min.setValidator(wc_validator)
+        struct_word_row.addWidget(self.word_count_min)
+
+        dash = QLabel("—")
+        dash.setFixedWidth(4)
+        struct_word_row.addWidget(dash)
+
+        lbl_max = _make_label("max")
+        struct_word_row.addWidget(lbl_max)
+
+        self.word_count_max = QLineEdit()
+        self.word_count_max.setPlaceholderText("如 2000")
+        self.word_count_max.setText(str(DEFAULT_WORD_COUNT_MAX))
+        self.word_count_max.setFixedWidth(wc_width)
+        wc_validator2 = QRegularExpressionValidator(QRegularExpression(r"^\d{1,5}$"))
+        self.word_count_max.setValidator(wc_validator2)
+        struct_word_row.addWidget(self.word_count_max)
+
+        main_layout.addLayout(struct_word_row)
+
+        # ────────── G3: 输出语言 · 语气风格 ──────────
+        self.language_combo = make_combo()
+        self.language_combo.addItems(LABEL_MAP["language"])
+        self.language_combo.setCurrentIndex(
+            OPTIONS_MAP["language"].index(DEFAULT_LANGUAGE))
+
+        self.tone_combo = make_combo()
+        self.tone_combo.addItems(LABEL_MAP["tone"])
+        self.tone_combo.setCurrentIndex(
+            OPTIONS_MAP["tone"].index(DEFAULT_TONE))
+        add_dual_row("输出语言", self.language_combo, "语气风格", self.tone_combo)
+
+        # ────────── G4: 格式要求复选框 ──────────
+        from models import (
+            DEFAULT_STRICT_WORD_LIMIT,
+            DEFAULT_AUTO_TITLE,
+            DEFAULT_FORBID_NEW_FACTS, DEFAULT_SHOW_SOURCE,
+        )
+        self.cb_strict_word_limit = QCheckBox("严格遵守字数限制")
+        self.cb_strict_word_limit.setChecked(DEFAULT_STRICT_WORD_LIMIT)
+
+        self.cb_auto_title = QCheckBox("自动生成标题")
+        self.cb_auto_title.setChecked(DEFAULT_AUTO_TITLE)
+
+        self.cb_forbid_new_facts = QCheckBox("不引入新事实")
+        self.cb_forbid_new_facts.setChecked(DEFAULT_FORBID_NEW_FACTS)
+
+        self.cb_show_source = QCheckBox("显示来源标注")
+        self.cb_show_source.setChecked(DEFAULT_SHOW_SOURCE)
+
+        fmt_grid = QGridLayout()
+        fmt_grid.setSpacing(8)
+        fmt_grid.addWidget(self.cb_strict_word_limit, 0, 0)
+        fmt_grid.addWidget(self.cb_auto_title, 0, 1)
+        fmt_grid.addWidget(self.cb_forbid_new_facts, 1, 0)
+        fmt_grid.addWidget(self.cb_show_source, 1, 1)
+
+        lbl = _make_label("高级选项")
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(_spacing)
+        row.addWidget(lbl)
+        row.addLayout(fmt_grid)
+        main_layout.addLayout(row)
+
+        # ────────── 特殊说明 (Special Remarks) ──────────
+        self.special_remarks = QTextEdit()
+        self.special_remarks.setStyleSheet("""
+            QTextEdit {
+                background: #FFFFFF;
+                border: 1px solid #DDE3EA;
+                border-radius: 6pt;
+                padding: 6pt 8pt;
+            }
+        """)
+        self.special_remarks.setPlaceholderText(
+            "在此输入特殊要求，这些要求将具有最高优先级，覆盖其他所有设置…"
+        )
+        self.special_remarks.setMaximumHeight(100)
+
+        lbl2 = _make_label("附加要求")
+        row2 = QHBoxLayout()
+        row2.setContentsMargins(0, 0, 0, 0)
+        row2.setSpacing(_spacing)
+        lbl2.setAlignment(Qt.AlignTop)
+        row2.addWidget(lbl2)
+        row2.addWidget(self.special_remarks, stretch=1)
+        main_layout.addLayout(row2)
+
+        layout.addWidget(gb)
+
+    # -----------------------------------------------------------------------
+    # T2 — 右侧输出区（含标签页、导出/清空按钮）
+    # -----------------------------------------------------------------------
+
+    def _build_right_panel(self) -> QWidget:
+        """构建右侧输出面板（仅标签页，按钮统一放到底部工具栏）。"""
+        container = QWidget()
+        root_layout = QVBoxLayout(container)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(self._spacing)
+
+        # --- 标签页 ---
+        from PySide6.QtWidgets import QTabWidget
+        self.tabs = QTabWidget()
+        self.tabs.setTabsClosable(False)
+
+        # Tab 1: 结果预览
+        self.result_view = QTextEdit()
+        self.result_view.setReadOnly(True)
+        self.result_view.setPlaceholderText("改写结果将在此显示…")
+        font = QFont("Noto Sans", 9)
+        self.result_view.setFont(font)
+        self.tabs.addTab(self.result_view, "结果预览")
+
+        # Tab 2: 原文/结果对照
+        diff_widget = QWidget()
+        diff_layout = QVBoxLayout(diff_widget)
+        diff_layout.setSpacing(8)
+        left_splitter = QSplitter(Qt.Horizontal)
+        self.orig_view = QTextEdit()
+        self.orig_view.setReadOnly(True)
+        self.orig_view.setPlaceholderText("原文…")
+        font2 = QFont("Noto Sans", 9)
+        self.orig_view.setFont(font2)
+        self.gen_view = QTextEdit()
+        self.gen_view.setReadOnly(True)
+        self.gen_view.setPlaceholderText("生成结果…")
+        self.gen_view.setFont(font2)
+        left_splitter.addWidget(self.orig_view)
+        left_splitter.addWidget(self.gen_view)
+        left_splitter.setStretchFactor(0, 1)
+        left_splitter.setStretchFactor(1, 1)
+        diff_layout.addWidget(QLabel("原文 / 改写对照"))
+        diff_layout.addWidget(left_splitter, stretch=1)
+        self.tabs.addTab(diff_widget, "对照视图")
+
+        root_layout.addWidget(self.tabs, stretch=1)
+
+        return container
+
+    # -----------------------------------------------------------------------
+    # T1.8 — 底部工具栏（主操作按钮 + 导出格式选择）
+    # -----------------------------------------------------------------------
+
+    def _build_bottom_bar(self):
+        """底部工具栏：新建任务、清空参数、开始改写 + 复制/导出 + 格式选择。"""
+        frame = QFrame()
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        self.btn_new = QPushButton("新建任务")
+        self.btn_new.setObjectName("primaryButton")
+        self.btn_new.setFixedWidth(90)
+
+        self.btn_clear_params = QPushButton("清空参数")
+        self.btn_clear_params.setObjectName("primaryButton")
+        self.btn_clear_params.setFixedWidth(90)
+
+        self.btn_start = QPushButton("开始写作")
+        self.btn_start.setObjectName("primaryButton")
+        self.btn_start.setFixedWidth(90)
+
+        self.btn_copy_result = QPushButton("复制结果")
+        self.btn_copy_result.setObjectName("primaryButton")
+        self.btn_copy_result.setFixedWidth(90)
+
+        self.btn_export = QPushButton("导出结果")
+        self.btn_export.setObjectName("primaryButton")
+        self.btn_export.setFixedWidth(90)
+
+        # 导出格式选择 (TXT / DOCX)
+        self.radio_txt = QRadioButton("TXT")
+        self.radio_txt.setChecked(True)
+        self.radio_docx = QRadioButton("DOCX")
+        self.export_group = QButtonGroup()
+        self.export_group.addButton(self.radio_txt)
+        self.export_group.addButton(self.radio_docx)
+
+        fmt_label = QLabel("格式:")
+        fmt_label.setMinimumWidth(36)
+
+        layout.addWidget(self.btn_new, stretch=0)
+        layout.addWidget(self.btn_clear_params, stretch=0)
+        
+        layout.addWidget(self.btn_start, stretch=0)
+        layout.addStretch(1)
+        layout.addStretch(1)
+        layout.addWidget(self.btn_copy_result, stretch=0)
+        layout.addWidget(self.btn_export, stretch=0)
+        layout.addWidget(fmt_label, stretch=0)
+        layout.addWidget(self.radio_txt, stretch=0)
+        layout.addWidget(self.radio_docx, stretch=0)
+
+        # 连线
+        self.btn_new.clicked.connect(self.new_project)
+        self.btn_clear_params.clicked.connect(self.clear_all)
+        self.btn_start.clicked.connect(self.start_writing)
+        self.btn_copy_result.clicked.connect(
+            lambda: QApplication.clipboard().setText(self.result_view.toPlainText()))
+        self.btn_export.clicked.connect(self.save_output)
+
+        return frame
+
+    # -----------------------------------------------------------------------
+    # 输入模式切换 / 工具方法
+    # -----------------------------------------------------------------------
+
+    def update_input_mode(self):
+        """根据当前选中的 RadioButton 启用/禁用对应的输入控件。"""
+        mode = "text"
+        if self.rb_url.isChecked():
+            mode = "url"
+        elif self.rb_pdf.isChecked():
+            mode = "pdf"
+
+        self.url_edit.setEnabled(mode == "url")
+        self.text_input.setEnabled(mode == "text")
+        self.pdf_path.setEnabled(mode == "pdf")
+        self.cb_pdf_ocr.setEnabled(mode == "pdf")
+        self.btn_open_pdf.setEnabled(mode == "pdf")
+
+    def choose_pdf(self):
+        """弹出文件对话框选择 PDF。"""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "选择 PDF", "", "*.pdf  (*.pdf)")
+        if path:
+            self.pdf_path.setText(path)
+
+    # -----------------------------------------------------------------------
+    # 顶部按钮槽函数（Phase-1 占位）
+    # -----------------------------------------------------------------------
+
+    def new_project(self):
+        """新建项目：清空左右两侧。"""
+        self.clear_all()
+
+    def open_file(self):
+        """打开本地文件到左侧输入区。"""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "打开文件", "",
+            "所有支持格式 (*.pdf *.docx *.txt);;PDF 文件 (*.pdf);;"
+            "Word 文档 (*.docx);;文本文件 (*.txt)")
+        if path:
+            self._status.showMessage(f"已选择: {path}")
+
+    def clear_all(self):
+        """清空全部区域。"""
+        self.clear_left_input()
+        self.clear_right_output()
+        # Reset to defaults
+        if hasattr(self, "style_combo"):
+            self.style_combo.setCurrentIndex(0)             # default=新闻稿(news_release)
+            self.scene_combo.setCurrentIndex(0)             # default=对外发布(external_release)
+            self.audience_combo.setCurrentIndex(0)          # default=普通公众(general_public)
+            self.length_combo.setCurrentIndex(1)            # default=平衡(balanced)
+            self.language_combo.setCurrentIndex(0)          # default=中文(zh)
+            self.tone_combo.setCurrentIndex(0)              # default=正式(formal)
+            self.struct_combo.setCurrentIndex(1)            # default=优化结构(optimize)
+            self.word_count_min.setText(str(DEFAULT_WORD_COUNT_MIN))
+            self.word_count_max.setText(str(DEFAULT_WORD_COUNT_MAX))
+            self.cb_strict_word_limit.setChecked(DEFAULT_STRICT_WORD_LIMIT)
+            self.cb_auto_title.setChecked(DEFAULT_AUTO_TITLE)
+            self.cb_forbid_new_facts.setChecked(DEFAULT_FORBID_NEW_FACTS)
+            self.cb_show_source.setChecked(DEFAULT_SHOW_SOURCE)
+        if hasattr(self, "special_remarks"):
+            self.special_remarks.clear()
+
+    def start_writing(self):
+        """开始改写。"""
+        params = self.collect_parameters()
+        text = self._get_input_text()
+        if not text.strip():
+            self._status.showMessage("请先输入或加载原文。")
+            return
+
+        self._status.showMessage("正在改写…")
+        self.result_view.setPlainText("[改写结果将在此显示 — Phase 2]")
+        self._status.showMessage("完成。", 3000)
+
+    def save_output(self):
+        """保存输出到本地（根据 TXT/DOCX 单选按钮选择默认格式）。"""
+        text = self.result_view.toPlainText()
+        if not text.strip():
+            self._status.showMessage("没有可保存的内容。")
+            return
+
+        # 根据导出格式选择决定默认扩展名和过滤器
+        if self.radio_docx.isChecked():
+            default_ext = "改写结果.docx"
+            filters = "Word 文档 (*.docx);;文本文件 (*.txt)"
+        else:
+            default_ext = "改写结果.txt"
+            filters = "文本文件 (*.txt);;Word 文档 (*.docx)"
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, "保存改写结果", "", filters)
+        if path:
+            try:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(text)
+                self._status.showMessage(f"已保存到 {path}", 3000)
+            except OSError as e:
+                self._status.showMessage(f"保存失败: {e}")
+
+    # -----------------------------------------------------------------------
+    # 清除 / 读取辅助方法
+    # -----------------------------------------------------------------------
+
+    def clear_left_input(self):
+        self.url_edit.clear()
+        self.text_input.clear()
+        self.pdf_path.clear()
+        self.rb_text.setChecked(True)
+        self.update_input_mode()
+
+    def clear_right_output(self):
+        self.result_view.clear()
+        self.orig_view.clear()
+        self.gen_view.clear()
+
+    def _get_input_text(self) -> str:
+        """从当前选中的输入模式获取文本。"""
+        if self.rb_url.isChecked():
+            return self.url_edit.text()
+        if self.rb_pdf.isChecked():
+            return f"[PDF]: {self.pdf_path.text()}"
+        return self.text_input.toPlainText()
+
+    # -----------------------------------------------------------------------
+    # T1.7 — 参数收集方法（供 Phase-2 Prompt 拼接使用）
+    # -----------------------------------------------------------------------
+
+    def collect_parameters(self) -> dict:
+        """收集左侧所有用户配置，返回与 RewriteConfig 对齐的字典（13 字段）。"""
+        return {
+            "style":             _get_option_value("style", self.style_combo),
+            "scene":             _get_option_value("scene", self.scene_combo),
+            "audience":          _get_option_value("audience", self.audience_combo),
+            "word_count_min":    int(self.word_count_min.text()) if self.word_count_min.text().isdigit() else DEFAULT_WORD_COUNT_MIN,
+            "word_count_max":    int(self.word_count_max.text()) if self.word_count_max.text().isdigit() else DEFAULT_WORD_COUNT_MAX,
+            "length_strategy":   _get_option_value("length_strategy", self.length_combo),
+            "strict_word_limit": self.cb_strict_word_limit.isChecked(),
+            "language":          _get_option_value("language", self.language_combo),
+            "tone":              _get_option_value("tone", self.tone_combo),
+            "structure_mode":    _get_option_value("structure_mode", self.struct_combo),
+            "auto_title":        self.cb_auto_title.isChecked(),
+            "forbid_new_facts":  self.cb_forbid_new_facts.isChecked(),
+            "show_source":       self.cb_show_source.isChecked(),
+        }
+    # -----------------------------------------------------------------------
+    # T1.9 — 窗口居中
+    # -----------------------------------------------------------------------
+
+    def _center_on_screen(self):
+        """将窗口居中显示在屏幕中间。"""
+        screen = QApplication.primaryScreen().geometry()
+        geo = self.frameGeometry()
+        center_point = screen.center()
+        geo.moveCenter(center_point)
+        self.move(geo.topLeft())
+
+
+# ---------------------------------------------------------------------------
+# 入口点
+# ---------------------------------------------------------------------------
+
+def main() -> None:
+    # HiDPI 配置必须在 QApplication 创建之前设置
+    QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
+        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+    )
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+    app.setStyleSheet(APP_STYLE)
+    w = MainWindow()
+    w._center_on_screen()
+    w.show()
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()

@@ -28,6 +28,7 @@ DEFAULT_STRUCTURE_MODE = "optimize"
 DEFAULT_KEEP_SUBTITLES = True
 DEFAULT_AUTO_TITLE = True
 DEFAULT_FORBID_NEW_FACTS = True
+DEFAULT_SHOW_SOURCE = False
 
 
 # ---------------------------------------------------------------------------
@@ -81,7 +82,7 @@ STRUCTURE_MODE_OPTIONS: list[str] = [
 
 
 # ---------------------------------------------------------------------------
-# RewriteConfig  — 改写参数配置对象（14 字段）
+# RewriteConfig  — 改写参数配置对象（15 字段）
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -102,6 +103,7 @@ class RewriteConfig:
     keep_subtitles: bool = DEFAULT_KEEP_SUBTITLES
     auto_title: bool = DEFAULT_AUTO_TITLE
     forbid_new_facts: bool = DEFAULT_FORBID_NEW_FACTS
+    show_source: bool = DEFAULT_SHOW_SOURCE
 
     # ------------------------------------------------------------------
     # 序列化 / 反序列化
