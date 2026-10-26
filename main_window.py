@@ -139,17 +139,18 @@ QPushButton:pressed {
 QPushButton#primaryButton {
     background: #5B8DB8;
     color: white;
-    border: 0.8px solid #4E7FA8;
-    border-radius: 10pt;
-    min-height: 53px;
-    max-height: 53px;
-    min-width: 90px;
-    max-width: 90px;
+    border: 0.5px solid transparent;
+    border-radius: 8pt;
+    padding: 4pt 12pt;
+    min-height: 36px;
+    max-height: 36px;
+    min-width: 80px;
+    max-width: 80px;
 }
 
 QPushButton#primaryButton:hover {
     background: #4A7CA8;
-    border-color: #3F6D96;
+    border-color: #3D6F9E;
 }
 
 QPushButton#primaryButton:pressed {
