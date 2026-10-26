@@ -64,241 +64,142 @@ def _get_option_value(field: str, combo: QComboBox) -> str:
 # ---------------------------------------------------------------------------
 # APP_STYLE — 全局样式表
 # ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-# APP_STYLE — 全局样式表（现代卡片风格）
-# ---------------------------------------------------------------------------
-# 色彩系统：
-#   背景 #F0F2F5 · 卡片 #FFFFFF · 主色 #4A90D9 · 悬停 #3A7BC8
-#   边框 #D8DEE6 · 文本 #2C3E50 · 次文本 #7F8C8D
 APP_STYLE = """
-/* ── 全局基底 ─────────────────────────────── */
 QWidget {
-    background-color: #F0F2F5;
-    color: #2C3E50;
-    font-family: 'Noto Sans SC', 'Noto Sans', 'Microsoft YaHei', sans-serif;
+    background: #EEEEEE;
+    color: #1F2937;
+    font-family: 'Noto Sans';
     font-size: 9pt;
 }
 
-/* ── 卡片式 GroupBox ──────────────────────── */
 QGroupBox {
-    background-color: #FFFFFF;
-    border: 1px solid #D8DEE6;
-    border-radius: 10px;
-    margin-top: 14px;
-    padding-top: 22px;
-    font-weight: bold;
-    font-size: 11pt;
+    background: transparent;
+    border: 1px solid #DDE3EA;
+    border-radius: 8pt;
+    margin-top: 8pt;
+    padding: 8pt;
+}
+
+QLabel {
+    background: transparent;
 }
 
 QGroupBox::title {
     subcontrol-origin: margin;
     subcontrol-position: top left;
-    left: 14px;
-    top: -10px;
-    padding: 0 8px;
-    font-size: 11pt;
-    color: #2C3E50;
+    left: 10pt;
+    padding: 0 4pt;
+    font-size: 7pt;
 }
 
-/* ── QLabel 通用 ──────────────────────────── */
-QLabel {
-    background-color: transparent;
-}
-
-/* ── 输入控件（行内编辑 / 下拉 / 文本域）──── */
 QLineEdit, QTextEdit, QComboBox, QSpinBox {
-    background-color: #FFFFFF;
-    border: 1.5px solid #D8DEE6;
-    border-radius: 7px;
-    padding: 5px 10px;
-    selection-background-color: #DBEAFE;
-    min-height: 28px;
+    background: #FFFFFF;
+    border: 0.8px solid #DCE1E8;
+    border-radius: 8pt;
+    padding: 4pt 8pt;
+    selection-background-color: #EAF2FF;
+    min-height: 30pt;
 }
 
-QLineEdit:focus, QTextEdit:focus, QComboBox:focus, QSpinBox:focus {
-    border: 1.5px solid #4A90D9;
-    background-color: #FAFCFF;
-}
-
-/* ── ComboBox 微调 ───────────────────────── */
 QComboBox::drop-down {
-    background: transparent;
-    border: none;
-    width: 20px;
+    background: #FFFFFF;
 }
 
 QComboBox::down-arrow {
     image: none;
-    border-left: 5px solid transparent;
-    border-right: 5px solid transparent;
-    border-top: 6px solid #9CA3AF;
-    padding-right: 4px;
-}
-
-QComboBox QAbstractItemView {
-    background-color: #FFFFFF;
-    border: 1.5px solid #D8DEE6;
-    border-radius: 7px;
-    selection-background-color: #DBEAFE;
-    selection-color: #2C3E50;
+    border: none;
 }
 
 QTextEdit {
     min-height: auto;
 }
 
-/* ── 按钮 — 默认（次要 / 幽灵）────────────── */
+QLineEdit:focus, QTextEdit:focus, QComboBox:focus, QSpinBox:focus {
+    border: 1.5pt solid #6BA4E0;
+    background: #FAFBFD;
+}
+
 QPushButton {
-    background-color: #FFFFFF;
-    border: 1.5px solid #D8DEE6;
-    border-radius: 7px;
-    padding: 6px 14px;
-    min-height: 28px;
-    font-weight: 500;
+    background: #FFFFFF;
+    border: 0.8px solid #DCE1E8;
+    border-radius: 7pt;
+    padding: 6pt 12pt;
+    min-height: 30pt;
 }
 
 QPushButton:hover {
-    background-color: #F0F7FF;
-    border-color: #4A90D9;
-    color: #4A90D9;
+    background: #EEF4FB;
+    border-color: #BFCDE0;
 }
 
 QPushButton:pressed {
-    background-color: #DBEAFE;
+    background: #DCE5F2;
 }
 
-/* ── 按钮 — 主色（通过 objectName="primaryButton" 调用）────── */
 QPushButton#primaryButton {
-    background-color: #4A90D9;
-    color: #FFFFFF;
-    border: none;
-    font-weight: 600;
+    background: #5B8DB8;
+    color: white;
+    border: 0.8px solid #4E7FA8;
+    border-radius: 10pt;
+    min-height: 53px;
+    max-height: 53px;
+    min-width: 90px;
+    max-width: 90px;
 }
 
 QPushButton#primaryButton:hover {
-    background-color: #3A7BC8;
+    background: #4A7CA8;
+    border-color: #3F6D96;
 }
 
 QPushButton#primaryButton:pressed {
-    background-color: #2E6AB0;
+    background: #3F6D96;
 }
 
-/* ── 单选 / 复选框 ───────────────────────── */
-QRadioButton, QCheckBox {
-    spacing: 8px;
-    font-size: 9pt;
+QRadioButton {
+    spacing: 6pt;
 }
 
-QRadioButton::indicator, QCheckBox::indicator {
-    width: 16px;
-    height: 16px;
-    border-radius: 4px;
-    border: 1.5px solid #D8DEE6;
-    background-color: #FFFFFF;
-}
-
-QRadioButton::indicator:checked, QCheckBox::indicator:checked {
-    background-color: #4A90D9;
-    border-color: #4A90D9;
-}
-
-QRadioButton::indicator:hover, QCheckBox::indicator:hover {
-    border-color: #4A90D9;
-}
-
-/* ── 滚动条 ──────────────────────────────── */
 QScrollBar:vertical {
-    width: 8px;
-    background: transparent;
+    width: 10pt;
+    background: #F7F9FC;
     margin: 0px;
 }
 
 QScrollBar::handle:vertical {
-    background-color: #C4CED8;
-    min-height: 28px;
-    border-radius: 4px;
+    background: #C9D4E3;
+    min-height: 24pt;
+    border-radius: 5pt;
 }
 
-QScrollBar::handle:vertical:hover {
-    background-color: #A0AEBA;
-}
-
-QScrollBar::add-line, QScrollBar::sub-line {
-    height: 0px;
-}
-
-QScrollBar::add-page, QScrollBar::sub-page {
-    background: none;
-}
-
-/* ── TabWidget ───────────────────────────── */
-QTabWidget::pane {
-    border: 1px solid #D8DEE6;
-    border-radius: 10px;
-    background-color: #FFFFFF;
-    top: -1px;
-}
-
-QTabBar::tab {
-    background-color: #F0F2F5;
-    border: 1.5px solid #D8DEE6;
-    border-bottom: none;
-    border-radius: 8px 8px 0 0;
-    padding: 7px 18px;
-    min-width: 80px;
-    font-size: 9pt;
-    margin-right: 2px;
-}
-
-QTabBar::tab:selected {
-    background-color: #FFFFFF;
-    border-bottom-color: #FFFFFF;
-    color: #4A90D9;
-    font-weight: 600;
-}
-
-QTabBar::tab:hover:!selected {
-    background-color: #E8EDF2;
-}
-
-/* ── Splitter 分隔条 ─────────────────────── */
-QSplitter::handle {
-    background-color: #D8DEE6;
-}
-
-QSplitter::handle:horizontal {
-    width: 3px;
-}
-
-/* ── StatusBar ───────────────────────────── */
 QStatusBar {
-    background-color: #FFFFFF;
-    border-top: 1px solid #D8DEE6;
-    color: #7F8C8D;
-    font-size: 8.5pt;
+    background: #FFFFFF;
+    border-top: 1px solid #DDE3EA;
 }
 
-/* ── MenuBar ─────────────────────────────── */
 QMenuBar {
-    spacing: 6px;
-    background-color: transparent;
+    spacing: 6pt;
 }
 
 QMenuBar::item {
-    padding: 4px 10px;
+    padding: 4pt 8pt;
+    spacing: 6pt;
     background: transparent;
-    border-radius: 4px;
 }
 
 QMenuBar::item:selected {
-    background-color: #E8EDF2;
+    background: #EEF4FB;
 }
 
-/* ── ToolBar ─────────────────────────────── */
 QToolBar {
-    spacing: 6px;
+    spacing: 6pt;
     border: none;
     background: transparent;
+}
+
+QToolBar::separator {
+    width: 1px;
+    background: #DDE3EA;
 }
 """
 
@@ -321,8 +222,8 @@ class MainWindow(QMainWindow):
         # --- FontMetrics-based layout constants (auto-scale with DPI/font) ---
         fm = QFontMetrics(font)
         fh = fm.height()            # rendered font height in px
-        self._margin = max(int(fh * 1.6), 12)       # ~130% of line height, min 12px
-        self._spacing = max(int(fh * 0.8), 6)       # ~70% of line height, min 6px
+        self._margin = max(int(fh * 1.2), 8)       # ~96% of a typical line, min 8px
+        self._spacing = max(int(fh * 0.6), 4)      # ~56% of a typical line, min 4px
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -373,7 +274,7 @@ class MainWindow(QMainWindow):
 
     def _build_left_panel(self):
         scroll = QFrame()
-        scroll.setFixedWidth(420)
+        scroll.setFixedWidth(404)
         layout = QVBoxLayout(scroll)
         layout.setContentsMargins(0, 0, 0, 0)
 
@@ -390,14 +291,14 @@ class MainWindow(QMainWindow):
         # --- "输入来源"独立标题标签，紧贴框上方 ---
         input_title = QLabel("输入来源")
         input_title.setStyleSheet(
-            "QLabel { font-weight: bold; font-size: 12pt; padding-bottom: 4px; color: #2C3E50; }"
+            "QLabel { font-weight: bold; font-size: 10pt; padding-bottom: 2px; }"
         )
         layout.addWidget(input_title)
 
         gb = QGroupBox("")
         gb.setFlat(True)
         outer = QVBoxLayout(gb)
-        outer.setSpacing(10)
+        outer.setSpacing(6)
 
         # --- 纵向单选按钮组：网页链接 / 上传 PDF / 粘贴全文 ---
         self.rb_url = QRadioButton("网页链接")
@@ -428,13 +329,13 @@ class MainWindow(QMainWindow):
 
         # --- 用垂直布局排列：每一行 = 单选按钮 + 控件 ---
         input_rows = QVBoxLayout()
-        input_rows.setSpacing(8)
-        input_rows.setContentsMargins(10, 6, 2, 6)
+        input_rows.setSpacing(4)
+        input_rows.setContentsMargins(8, 4, 0, 4)
 
         # Row: 网页链接 + URL 输入框 + "加载"
         url_row = QHBoxLayout()
         url_row.setContentsMargins(0, 0, 0, 0)
-        url_row.setSpacing(8)
+        url_row.setSpacing(6)
         url_row.addWidget(self.rb_url)
         url_row.addWidget(self.url_edit, stretch=1)
         url_row.addWidget(btn_load_url)
@@ -442,7 +343,7 @@ class MainWindow(QMainWindow):
         # Row: 上传 PDF + 路径 + "打开" + OCR
         pdf_row = QHBoxLayout()
         pdf_row.setContentsMargins(0, 0, 0, 0)
-        pdf_row.setSpacing(8)
+        pdf_row.setSpacing(6)
         pdf_row.addWidget(self.rb_pdf)
         pdf_row.addWidget(self.pdf_path, stretch=1)
         pdf_row.addWidget(self.btn_open_pdf)
@@ -451,7 +352,7 @@ class MainWindow(QMainWindow):
         # Row: 粘贴全文 + QTextEdit（跨全宽）
         text_row = QHBoxLayout()
         text_row.setContentsMargins(0, 0, 0, 0)
-        text_row.setSpacing(8)
+        text_row.setSpacing(6)
         text_row.addWidget(self.rb_text)
         text_row.addStretch(1)
 
@@ -493,14 +394,14 @@ class MainWindow(QMainWindow):
         # --- "设置参数"独立标题标签，紧贴框上方 ---
         params_title = QLabel("设置参数")
         params_title.setStyleSheet(
-            "QLabel { font-weight: bold; font-size: 12pt; padding-bottom: 4px; color: #2C3E50; }"
+            "QLabel { font-weight: bold; font-size: 10pt; padding-bottom: 2px; }"
         )
         layout.addWidget(params_title)
 
         gb = QGroupBox("")
         gb.setFlat(True)
         main_layout = QVBoxLayout(gb)
-        main_layout.setSpacing(14)
+        main_layout.setSpacing(10)
 
         # ────────── helper: 统一 Combo 宽度（4个汉字 + 填充）及创建 ──────────
         self_fm = QFontMetrics(self.font())
@@ -653,7 +554,7 @@ class MainWindow(QMainWindow):
         self.cb_show_source.setChecked(DEFAULT_SHOW_SOURCE)
 
         fmt_grid = QGridLayout()
-        fmt_grid.setSpacing(12)
+        fmt_grid.setSpacing(8)
         fmt_grid.addWidget(self.cb_strict_word_limit, 0, 0)
         fmt_grid.addWidget(self.cb_auto_title, 0, 1)
         fmt_grid.addWidget(self.cb_forbid_new_facts, 1, 0)
@@ -669,7 +570,14 @@ class MainWindow(QMainWindow):
 
         # ────────── 特殊说明 (Special Remarks) ──────────
         self.special_remarks = QTextEdit()
-        # QSS 统一控制样式，无需内联设置
+        self.special_remarks.setStyleSheet("""
+            QTextEdit {
+                background: #FFFFFF;
+                border: 1px solid #DDE3EA;
+                border-radius: 6pt;
+                padding: 6pt 8pt;
+            }
+        """)
         self.special_remarks.setPlaceholderText(
             "在此输入特殊要求，这些要求将具有最高优先级，覆盖其他所有设置…"
         )
@@ -713,7 +621,7 @@ class MainWindow(QMainWindow):
         # Tab 2: 原文/结果对照
         diff_widget = QWidget()
         diff_layout = QVBoxLayout(diff_widget)
-        diff_layout.setSpacing(12)
+        diff_layout.setSpacing(8)
         left_splitter = QSplitter(Qt.Horizontal)
         self.orig_view = QTextEdit()
         self.orig_view.setReadOnly(True)
@@ -745,27 +653,22 @@ class MainWindow(QMainWindow):
         frame = QFrame()
         layout = QHBoxLayout(frame)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
+        layout.setSpacing(8)
 
         self.btn_new = QPushButton("新建任务")
         self.btn_new.setObjectName("primaryButton")
-        self.btn_new.setFixedWidth(100)
 
         self.btn_clear_params = QPushButton("清空参数")
         self.btn_clear_params.setObjectName("primaryButton")
-        self.btn_clear_params.setFixedWidth(100)
 
         self.btn_start = QPushButton("开始写作")
         self.btn_start.setObjectName("primaryButton")
-        self.btn_start.setFixedWidth(100)
 
         self.btn_copy_result = QPushButton("复制结果")
         self.btn_copy_result.setObjectName("primaryButton")
-        self.btn_copy_result.setFixedWidth(100)
 
         self.btn_export = QPushButton("导出结果")
         self.btn_export.setObjectName("primaryButton")
-        self.btn_export.setFixedWidth(100)
 
         # 导出格式选择 (TXT / DOCX)
         self.radio_txt = QRadioButton("TXT")
