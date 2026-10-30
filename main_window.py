@@ -8,9 +8,13 @@ proj-publisher — 主窗口 UI (Phase 1)
 from __future__ import annotations
 
 import sys
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QSizePolicy
+import logging
+
+from PySide6.QtCore import Qt, QThread
+from PySide6.QtWidgets import QSizePolicy, QMessageBox
 from PySide6.QtGui import QFont, QFontMetrics, QGuiApplication
+
+logger = logging.getLogger(__name__)
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QSplitter, QGroupBox, QLabel, QPushButton, QRadioButton,
@@ -30,7 +34,14 @@ from models import (
     DEFAULT_STYLE, DEFAULT_SCENE, DEFAULT_AUDIENCE,
     DEFAULT_LENGTH_STRATEGY, DEFAULT_LANGUAGE, DEFAULT_TONE,
     DEFAULT_STRUCTURE_MODE,
+    DEFAULT_STRICT_WORD_LIMIT, DEFAULT_AUTO_TITLE,
+    DEFAULT_FORBID_NEW_FACTS, DEFAULT_SHOW_SOURCE,
 )
+
+# ---------------------------------------------------------------------------
+# worker — 后台工作线程与信号（持久化，防止 GC 回收）
+# ---------------------------------------------------------------------------
+from worker import RewriteWorker, WorkerSignals
 
 # ---------------------------------------------------------------------------
 # 中文显示标签 ↔ 英文值映射表（供 Radio/Combo 读写使用）
@@ -60,6 +71,20 @@ OPTIONS_MAP = {
 def _get_option_value(field: str, combo: QComboBox) -> str:
     """通过 combo 的选中索引从 OPTIONS_MAP 中取真实英文值。"""
     return OPTIONS_MAP[field][combo.currentIndex()]
+
+
+# ---------------------------------------------------------------------------
+# 语言代码映射 — GUI 显示文本 → I18n 代码
+# ---------------------------------------------------------------------------
+def _map_language(display_text: str) -> str:
+    """将语言组合框的显示文本（如'中文','英文'）映射为 ISO 639-1 代码。"""
+    mapping = {
+        "中文": "zh",
+        "英文": "en",
+        "日本語": "ja",
+        "한국어": "ko",
+    }
+    return mapping.get(display_text, display_text[:2].lower())
 
 # ---------------------------------------------------------------------------
 # APP_STYLE — 全局样式表
@@ -210,6 +235,13 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
+
+        # ------------------------------------------------------------------
+        # T1.8 — 持久化 WorkerSignals，防止被 GC 回收导致段错误 / AttributeError
+        # ------------------------------------------------------------------
+        self._signals = WorkerSignals()
+        self._thread: QThread | None = None            # 后台线程引用
+        self._worker: RewriteWorker | None = None       # 工作器引用（用于 cancel）
 
         self.setWindowTitle("文章改写工具")
         self.resize(1280, 720)
@@ -611,13 +643,28 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.tabs.setTabsClosable(False)
 
-        # Tab 1: 结果预览
+        # Tab 1: 结果预览 (含标题行 + 正文区)
+        tab1_widget = QWidget()
+        tab1_layout = QVBoxLayout(tab1_widget)
+        tab1_layout.setContentsMargins(0, 0, 0, 0)
+        tab1_layout.setSpacing(8)
+
+        # 标题输入框 (只读，由 AI 生成后填充)
+        self.title_edit = QLineEdit()
+        self.title_edit.setReadOnly(True)
+        self.title_edit.setPlaceholderText("改写后的标题将显示在此…")
+        self.title_edit.setFixedHeight(36)
+        tab1_layout.addWidget(self.title_edit)
+
+        # 正文预览区
         self.result_view = QTextEdit()
         self.result_view.setReadOnly(True)
         self.result_view.setPlaceholderText("改写结果将在此显示…")
         font = QFont("Noto Sans", 9)
         self.result_view.setFont(font)
-        self.tabs.addTab(self.result_view, "结果预览")
+        tab1_layout.addWidget(self.result_view, stretch=1)
+
+        self.tabs.addTab(tab1_widget, "结果预览")
 
         # Tab 2: 原文/结果对照
         diff_widget = QWidget()
@@ -769,20 +816,60 @@ class MainWindow(QMainWindow):
             self.special_remarks.clear()
 
     def start_writing(self):
-        """开始改写。"""
-        params = self.collect_parameters()
-        text = self._get_input_text()
-        if not text.strip():
-            self._status.showMessage("请先输入或加载原文。")
+        """点击「开始撰写」→ 内容提取 → AI 改写（后台线程）。"""
+        config = self.collect_parameters()
+        source_type, source_value = self._get_source_info()
+
+        if not source_value:
+            QMessageBox.warning(
+                self, "缺少输入",
+                "请先选择输入源（网页 URL / PDF 文件）或在文本框中粘贴原文。",
+            )
             return
 
-        self._status.showMessage("正在改写…")
-        self.result_view.setPlainText("[改写结果将在此显示 — Phase 2]")
-        self._status.showMessage("完成。", 3000)
+        # 禁用按钮防止重复点击
+        self.btn_start.setEnabled(False)
+        self.btn_start.setText("改写中…")
+
+        # 清空结果区并显示加载状态
+        self.title_edit.clear()
+        self.result_view.clear()
+        self.result_view.append("⏳ 正在准备改写任务…")
+
+        # 创建后台线程 — T1.8：复用持久化信号对象，先清理旧线程
+        signals = self._signals
+
+        if self._thread and self._thread.isRunning():
+            if self._worker:
+                self._worker.cancel()
+            self._thread.wait(3000)
+            # 断开旧连接防止重复发射（忽略未连接的信号）
+            for sig_name in ("status", "progress", "finished", "error"):
+                try:
+                    getattr(self._signals, sig_name).disconnect()
+                except TypeError:
+                    pass
+
+        signals.status.connect(lambda msg: self._status.showMessage(msg))
+        signals.progress.connect(self._on_progress)
+        signals.finished.connect(self._on_rewrite_finished)
+        signals.error.connect(self._on_rewrite_error)
+
+        self._thread = QThread()
+        self._worker = RewriteWorker(source_type, source_value, config, signals)
+        self._worker.moveToThread(self._thread)
+
+        # 线程完成 / 错误后自动清理（通过 thread.finished → _on_thread_finished）
+        self._thread.started.connect(self._worker.run)
+        self._thread.finished.connect(self._worker.deleteLater)
+        self._thread.finished.connect(self._on_thread_finished)
+
+        self._thread.start()
 
     def save_output(self):
         """保存输出到本地（根据 TXT/DOCX 单选按钮选择默认格式）。"""
         text = self.result_view.toPlainText()
+        title = self.title_edit.text().strip()
         if not text.strip():
             self._status.showMessage("没有可保存的内容。")
             return
@@ -791,19 +878,33 @@ class MainWindow(QMainWindow):
         if self.radio_docx.isChecked():
             default_ext = "改写结果.docx"
             filters = "Word 文档 (*.docx);;文本文件 (*.txt)"
+            fmt = "docx"
         else:
             default_ext = "改写结果.txt"
             filters = "文本文件 (*.txt);;Word 文档 (*.docx)"
+            fmt = "txt"
 
         path, _ = QFileDialog.getSaveFileName(
             self, "保存改写结果", "", filters)
         if path:
+            # 确保文件扩展名正确
+            if fmt == "docx" and not path.lower().endswith(".docx"):
+                path = path + ".docx"
+            elif fmt == "txt" and not path.lower().endswith(".txt"):
+                path = path + ".txt"
+
             try:
-                with open(path, "w", encoding="utf-8") as f:
-                    f.write(text)
-                self._status.showMessage(f"已保存到 {path}", 3000)
-            except OSError as e:
-                self._status.showMessage(f"保存失败: {e}")
+                import exporter as exp
+                success, msg = exp.export_file(text, path, title=title)
+                if success:
+                    self._status.showMessage(f"已保存到 {path}", 3000)
+                else:
+                    QMessageBox.warning(self, "保存失败", msg)
+                    self._status.showMessage(msg)
+            except Exception as e:
+                logger.exception("导出异常")
+                QMessageBox.critical(self, "导出异常", f"{e}")
+                self._status.showMessage(f"导出异常: {e}")
 
     # -----------------------------------------------------------------------
     # 清除 / 读取辅助方法
@@ -817,6 +918,7 @@ class MainWindow(QMainWindow):
         self.update_input_mode()
 
     def clear_right_output(self):
+        self.title_edit.clear()
         self.result_view.clear()
         self.orig_view.clear()
         self.gen_view.clear()
@@ -830,11 +932,59 @@ class MainWindow(QMainWindow):
         return self.text_input.toPlainText()
 
     # -----------------------------------------------------------------------
+    # 输入源信息 — 供后台 worker 使用
+    # -----------------------------------------------------------------------
+
+    def _get_source_info(self) -> tuple[str, str]:
+        """返回 (source_type, source_value)。
+
+        source_type ∈ {'url', 'pdf', 'text'}。
+        - url   → URL 文本
+        - pdf   → PDF 文件路径
+        - text  → 原始文本内容
+        """
+        if self.rb_url.isChecked():
+            return "url", self.url_edit.text().strip()
+        elif self.rb_pdf.isChecked():
+            return "pdf", self.pdf_path.text().strip()
+        else:
+            return "text", self.text_input.toPlainText().strip()
+
+    # -----------------------------------------------------------------------
+    # Worker 回调 — 改写完成 / 出错 / 进度更新
+    # -----------------------------------------------------------------------
+
+    def _on_rewrite_finished(self, title: str, body: str):
+        """Worker 改写完成 → 更新 UI。"""
+        self.title_edit.setText(title)
+        self.result_view.setPlainText(body)
+        self.btn_start.setEnabled(True)
+        self.btn_start.setText("开始撰写")
+        self._status.showMessage(f"改写完成 — {len(body)} 字", 5000)
+
+    def _on_rewrite_error(self, error_msg: str):
+        """Worker 改写出错 → 弹窗 + 状态栏。"""
+        QMessageBox.critical(self, "改写失败", error_msg)
+        self.btn_start.setEnabled(True)
+        self.btn_start.setText("开始撰写")
+        self._status.showMessage(f"改写失败: {error_msg}")
+
+    def _on_thread_finished(self):
+        """线程真正退出后，清空悬空引用，防止下次访问已删除的 C++ 对象。"""
+        self._thread = None
+        self._worker = None
+
+    def _on_progress(self, step: int, max_steps: int, message: str):
+        """Worker 进度更新（可选）。"""
+        pct = int(100 * step / max(max_steps, 1)) if max_steps else 0
+        self.result_view.append(f"[{pct}%] {message}")
+
+    # -----------------------------------------------------------------------
     # T1.7 — 参数收集方法（供 Phase-2 Prompt 拼接使用）
     # -----------------------------------------------------------------------
 
     def collect_parameters(self) -> dict:
-        """收集左侧所有用户配置，返回与 RewriteConfig 对齐的字典（13 字段）。"""
+        """收集左侧所有用户配置，返回与 RewriteConfig 对齐的字典（15 字段）。"""
         return {
             "style":             _get_option_value("style", self.style_combo),
             "scene":             _get_option_value("scene", self.scene_combo),
@@ -843,13 +993,36 @@ class MainWindow(QMainWindow):
             "word_count_max":    int(self.word_count_max.text()) if self.word_count_max.text().isdigit() else DEFAULT_WORD_COUNT_MAX,
             "length_strategy":   _get_option_value("length_strategy", self.length_combo),
             "strict_word_limit": self.cb_strict_word_limit.isChecked(),
-            "language":          _get_option_value("language", self.language_combo),
+            "language":          _map_language(self.language_combo.currentText()),
             "tone":              _get_option_value("tone", self.tone_combo),
+            "keep_original_tone": False,  # 后续可扩展为 checkbox
             "structure_mode":    _get_option_value("structure_mode", self.struct_combo),
             "auto_title":        self.cb_auto_title.isChecked(),
             "forbid_new_facts":  self.cb_forbid_new_facts.isChecked(),
             "show_source":       self.cb_show_source.isChecked(),
+            "special_remarks":   self.special_remarks.toPlainText().strip() if hasattr(self, "special_remarks") else "",
         }
+    # -----------------------------------------------------------------------
+    # T1.8 — 优雅退出：停止后台线程后再关闭窗口
+    # -----------------------------------------------------------------------
+
+    def closeEvent(self, event):
+        """窗口关闭时取消后台任务，等待线程结束。"""
+        if self._thread and self._thread.isRunning():
+            logger.info("检测到正在运行的改写线程，执行清理…")
+            if self._worker:
+                self._worker.cancel()
+            # 最多等 5 秒
+            self._thread.wait(5000)
+            if self._thread.isRunning():
+                # 强制终止（防止 hang）
+                logger.warning("线程未在 5 秒内退出，强制终止。")
+                self._thread.requestInterruption()
+                self._thread.quit()
+                self._thread.wait(2000)
+
+        event.accept()
+
     # -----------------------------------------------------------------------
     # T1.9 — 窗口居中
     # -----------------------------------------------------------------------
