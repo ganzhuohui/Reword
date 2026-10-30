@@ -106,12 +106,12 @@ def build_prompt(original_text: str, config: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Ollama 调用
+# Ollama 调用（阻塞模式）
 # ---------------------------------------------------------------------------
 
 def call_ollama(prompt: str, model: str | None = None) -> str:
     """
-    通过 HTTP API 调用本地 Ollama，返回模型生成的文本。
+    通过 HTTP API 调用本地 Ollama，返回模型生成的完整文本。
     
     Raises
     ------
@@ -174,7 +174,101 @@ def call_ollama(prompt: str, model: str | None = None) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 统一改写入口
+# Ollama 调用（流式模式）
+# ---------------------------------------------------------------------------
+
+def call_ollama_streaming(
+    prompt: str,
+    model: str | None = None,
+    chunk_callback=None,  # def callback(text_chunk: str) -> bool  (False=stop early)
+) -> str:
+    """
+    流式调用 Ollama，每收到一个 token chunk 即通过 callback 推送。
+
+    Parameters
+    ----------
+    prompt : str
+        发送给模型的完整 prompt。
+    model : str | None
+        模型名称，None 则用 DEFAULT_MODEL。
+    chunk_callback : callable, optional
+        每次收到文本片段时调用 ``callback(chunk_text)``。
+        若回调返回 ``False`` 则提前终止流式读取（用于取消）。
+
+    Returns
+    -------
+    str — 所有 chunk 拼接后的完整文本。
+
+    Raises
+    ------
+    RuntimeError — 连接失败或请求异常。
+    """
+    try:
+        import ollama
+    except ImportError as e:
+        raise RuntimeError(
+            f"未安装 ollama Python 库。\n请运行: pip install ollama\n{e}"
+        ) from e
+
+    target_model = model or DEFAULT_MODEL
+    timeout_sec = 600
+
+    try:
+        client = ollama.Client(host=OLLAMA_BASE_URL, timeout=timeout_sec)
+        full_text = []
+
+        for resp in client.chat(
+            model=target_model,
+            messages=[{"role": "user", "content": prompt}],
+            options={"temperature": 0.7},
+            stream=True,
+        ):
+            # 每次响应可能包含 message.content
+            part = ""
+            if resp and hasattr(resp, "message") and resp.message is not None:
+                part = getattr(resp.message, "content", "") or ""
+
+            if part:
+                full_text.append(part)
+                # 推送到回调（用于 UI 实时更新）
+                if chunk_callback is not None:
+                    should_stop = chunk_callback(part)
+                    if should_stop is False:
+                        logger.info("流式回调请求提前终止。")
+                        break
+
+        result = "".join(full_text).strip()
+        if not result:
+            return "[警告：模型返回了空内容]"
+        return result
+
+    except ConnectionError:
+        raise RuntimeError(
+            f"无法连接到 Ollama（{OLLAMA_BASE_URL}）。\n"
+            "请确认：\n"
+            "1. Ollama 服务正在运行（ollama serve）；\n"
+            "2. 端口 11434 未被防火墙拦截。"
+        )
+    except TimeoutError:
+        raise RuntimeError(
+            f"Ollama 请求超时（>{timeout_sec}秒）。\n"
+            "可能原因：模型太大或显存不足导致加载缓慢，\n"
+            "请耐心等待后重试；或尝试使用更小的模型。"
+        )
+    except Exception as e:
+        err_msg = str(e)
+        if "timed out" in err_msg.lower() or "timeout" in err_msg.lower():
+            raise RuntimeError(
+                f"Ollama 请求超时（>{timeout_sec}秒）。\n"
+                "可能原因：模型太大或显存不足导致加载缓慢，\n"
+                "请耐心等待后重试；或尝试使用更小的模型。\n"
+                f"底层异常: {err_msg}"
+            ) from e
+        raise RuntimeError(f"Ollama 请求失败: {e}") from e
+
+
+# ---------------------------------------------------------------------------
+# 统一改写入口（阻塞）
 # ---------------------------------------------------------------------------
 
 def rewrite_content(original_text: str, config: dict) -> str:
@@ -192,3 +286,30 @@ def rewrite_content(original_text: str, config: dict) -> str:
     """
     prompt = build_prompt(original_text, config)
     return call_ollama(prompt)
+
+
+# ---------------------------------------------------------------------------
+# 统一改写入口（流式）
+# ---------------------------------------------------------------------------
+
+def rewrite_content_streaming(
+    original_text: str,
+    config: dict,
+    chunk_callback=None,  # def callback(chunk_text: str) -> bool
+) -> str:
+    """
+    流式改写：每收到一个文本片段即通过 ``chunk_callback`` 推送，
+    实现实时"打字机"效果。
+
+    Parameters
+    ----------
+    original_text : str — 待改写的原文。
+    config : dict — UI collect_parameters() 返回的配置字典。
+    chunk_callback : callable, optional — 收到片段时调用，返回 False 可提前终止。
+
+    Returns
+    -------
+    str — 改写后的完整文本（或用户取消时的已产出部分）。
+    """
+    prompt = build_prompt(original_text, config)
+    return call_ollama_streaming(prompt, chunk_callback=chunk_callback)

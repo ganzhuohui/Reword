@@ -22,8 +22,10 @@ class WorkerSignals(QObject):
     """工作线程 → UI 的信号集。"""
     status = Signal(str)              # 状态栏消息
     progress = Signal(int, int, str)  # (current, total, message) steps
+    chunk = Signal(str)              # 流式输出 — 每次收到一个文本片段时发出
     finished = Signal(str, str)       # 成功：(title, body) 改写后的标题和正文
     error = Signal(str)              # 错误信息
+    cancelled = Signal()             # 用户取消完成
 
 
 # ---------------------------------------------------------------------------
@@ -68,7 +70,7 @@ class RewriteWorker(QObject):
     # ------------------------------------------------------------------
 
     def run(self):
-        """在后台线程执行：抽取 → 改写。"""
+        """在后台线程执行：抽取 → 流式改写。"""
         import content_extractor as ce
         import rewriter as rw
 
@@ -89,39 +91,70 @@ class RewriteWorker(QObject):
             self.signals.status.emit(f"原文提取完成（{len(original_text)} 字）。正在改写…")
             self.signals.progress.emit(2, 3, "原文提取完成，正在AI改写…")
 
-            # --- Step 2: AI 改写 — 加入心跳提示 ---
+            # --- Step 2: AI 流式改写 ---
             t0 = time.time()
             heartbeat_interval = 10  # 每 10 秒更新一次状态栏
             last_heartbeat = t0
+            collected_text = []  # 累积已收到的所有 chunk
 
-            def _heartbeat():
-                """在状态栏显示已等待时间，让用户知道任务仍在进行中。"""
+            def _on_chunk(chunk_text: str) -> bool:
+                """
+                每次流式回调：发射 chunk 信号供 UI 实时更新，
+                同时检查是否用户请求取消。
+                返回 True 表示继续，False 表示停止。
+                """
                 nonlocal last_heartbeat
+
+                collected_text.append(chunk_text)
+                self.signals.chunk.emit(chunk_text)
+
+                # 心跳提示（每 heartbeat_interval 秒更新一次状态栏）
                 now = time.time()
                 if now - last_heartbeat >= heartbeat_interval:
                     elapsed = int(now - t0)
+                    token_count = len("".join(collected_text))
                     self.signals.status.emit(
-                        f"⏳ AI改写进行中… (已等待 {elapsed} 秒，大模型首次加载可能较慢)"
+                        f"⏳ AI改写进行中… (已等待 {elapsed} 秒，已产出 {token_count} 字)"
                     )
                     last_heartbeat = now
 
-            # 先发送心跳让用户知道调用已开始
-            self.signals.status.emit("正在调用AI模型，请耐心等候…")
-            _heartbeat()
+                # 检查取消标志
+                if self.is_cancelled:
+                    return False
+                return True
 
-            rewritten = rw.rewrite_content(original_text, self.config)
+            def _on_first_chunk(chunk_text: str) -> bool:
+                """在第一次收到 chunk 时更新状态栏。"""
+                self.signals.status.emit("✏️ AI正在生成内容…")
+                return _on_chunk(chunk_text)
+
+            # 用标志来区分首次回调
+            first = [True]  # list 用于在闭包内修改
+            def streaming_callback(chunk_text: str) -> bool:
+                if first[0]:
+                    first[0] = False
+                    return _on_first_chunk(chunk_text)
+                return _on_chunk(chunk_text)
+
+            self.signals.status.emit("正在调用AI模型，请耐心等候…")
+            self.signals.progress.emit(2, 3, "正在调用AI模型…")
+
+            rewritten = rw.rewrite_content_streaming(
+                original_text, self.config, chunk_callback=streaming_callback
+            )
 
             elapsed_total = int(time.time() - t0)
 
             if self.is_cancelled:
-                self.signals.status.emit("已取消。")
+                self.signals.status.emit("任务已取消。")
+                self.signals.progress.emit(3, 3, "任务已取消。")
+                self.signals.cancelled.emit()
                 return
 
             self.signals.progress.emit(3, 3, f"改写完成！（耗时 {elapsed_total} 秒）")
             self.signals.status.emit(f"改写完成（耗时 {elapsed_total} 秒）。")
 
             # --- Step 3: 分离标题与正文 ---
-            # 尝试从改写结果中提取标题（取第一个非空行或检测 Markdown 标题）
             title = ""
             body = rewritten
             lines = rewritten.strip().split("\n", 1)

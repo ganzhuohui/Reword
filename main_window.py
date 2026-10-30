@@ -10,9 +10,9 @@ from __future__ import annotations
 import sys
 import logging
 
-from PySide6.QtCore import Qt, QThread
-from PySide6.QtWidgets import QSizePolicy, QMessageBox
-from PySide6.QtGui import QFont, QFontMetrics, QGuiApplication
+from PySide6.QtCore import Qt, QThread, QTimer, QEasingCurve, QPropertyAnimation, QPoint
+from PySide6.QtWidgets import QSizePolicy, QMessageBox, QGraphicsDropShadowEffect
+from PySide6.QtGui import QFont, QFontMetrics, QGuiApplication, QPalette, QColor
 
 logger = logging.getLogger(__name__)
 from PySide6.QtWidgets import (
@@ -85,6 +85,134 @@ def _map_language(display_text: str) -> str:
         "한국어": "ko",
     }
     return mapping.get(display_text, display_text[:2].lower())
+
+
+# ---------------------------------------------------------------------------
+# LoadingOverlay — 半透明加载面板（旋转动画 + 状态 + 计时器 + 取消按钮）
+# ---------------------------------------------------------------------------
+
+class LoadingOverlay(QWidget):
+    """
+    半透明悬浮面板，覆盖在目标 widget 上方。
+
+    包含：
+      - Unicode spinner 旋转动画 (⠋⠙⠹⠸⠼⠴⠦⠧)
+      - 状态文本（实时更新）
+      - 计时器显示已等待秒数
+      - 取消按钮
+    """
+
+    SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧")
+
+    def __init__(self, parent: QWidget):
+        super().__init__(parent)
+        self._setup_ui()
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._on_timer_tick)
+        self._spinner_index = 0
+        self._seconds = 0
+
+    def _setup_ui(self):
+        self.setStyleSheet(
+            "background-color: rgba(0, 0, 0, 150);"
+            "border-radius: 8px;"
+        )
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+        layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # --- Spinner + 状态文本行 ---
+        top_row = QHBoxLayout()
+        top_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.spinner_label = QLabel("⠋")
+        self.spinner_label.setFont(QFont("Noto Sans", 24))
+        self.spinner_label.setStyleSheet("color: #60A5FA; background: transparent;")
+        top_row.addWidget(self.spinner_label)
+
+        self.status_label = QLabel("正在加载…")
+        self.status_label.setFont(QFont("Noto Sans", 14))
+        self.status_label.setStyleSheet("color: #E5E7EB; background: transparent;")
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        top_row.addWidget(self.status_label)
+
+        layout.addLayout(top_row)
+
+        # --- 计时器行 ---
+        timer_row = QHBoxLayout()
+        timer_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.timer_label = QLabel("已等待 0 秒")
+        self.timer_label.setFont(QFont("Noto Sans", 12))
+        self.timer_label.setStyleSheet("color: #9CA3AF; background: transparent;")
+        timer_row.addWidget(self.timer_label)
+        layout.addLayout(timer_row)
+
+        # --- 提示文本 ---
+        hint = QLabel("AI 首次加载模型可能需要较长时间，请耐心等待…")
+        hint.setFont(QFont("Noto Sans", 10))
+        hint.setStyleSheet("color: #6B7280; background: transparent;")
+        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(hint)
+
+        # --- 取消按钮 ---
+        self.cancel_button = QPushButton("✕  取消任务")
+        self.cancel_button.setFont(QFont("Noto Sans", 13))
+        self.cancel_button.setFixedSize(140, 42)
+        self.cancel_button.setStyleSheet(
+            "QPushButton {"
+            "   background-color: #EF4444;"
+            "   color: white;"
+            "   border-radius: 8px;"
+            "   padding: 6px 16px;"
+            "}"
+            "QPushButton:hover {"
+            "   background-color: #DC2626;"
+            "}"
+            "QPushButton:pressed {"
+            "   background-color: #B91C1C;"
+            "}"
+        )
+        btn_row = QHBoxLayout()
+        btn_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        btn_row.addWidget(self.cancel_button)
+        layout.addLayout(btn_row)
+
+        layout.setContentsMargins(40, 30, 40, 30)
+
+    def _on_timer_tick(self):
+        self._seconds += 1
+        self.timer_label.setText(f"已等待 {self._seconds} 秒")
+        self._spinner_index = (self._spinner_index + 1) % len(self.SPINNER_FRAMES)
+        self.spinner_label.setText(self.SPINNER_FRAMES[self._spinner_index])
+
+    def show_event(self, parent_widget: QWidget, message: str = "正在加载…"):
+        """显示在父控件中央，调整大小适应内容。"""
+        self.status_label.setText(message)
+        self._seconds = 0
+        self._spinner_index = 0
+        self.spinner_label.setText(self.SPINNER_FRAMES[0])
+        self.timer_label.setText("已等待 0 秒")
+
+        geo = parent_widget.geometry()
+        w, h = int(geo.width() * 0.55), int(geo.height() * 0.6)
+        x, y = (geo.width() - w) // 2, (geo.height() - h) // 2
+        self.setGeometry(x, y, w, h)
+
+        self.raise_()
+        self.show()
+        self._timer.start(100)
+
+    def hide_event(self):
+        """隐藏面板，停止定时器。"""
+        self._timer.stop()
+        self.hide()
+
+    def set_message(self, message: str):
+        """更新状态文本。"""
+        self.status_label.setText(message)
+
 
 # ---------------------------------------------------------------------------
 # APP_STYLE — 全局样式表
@@ -260,6 +388,9 @@ class MainWindow(QMainWindow):
 
         central = QWidget()
         self.setCentralWidget(central)
+
+        # T2.5 — LoadingOverlay 实例（父为 central widget，覆盖在顶层）
+        self.overlay = LoadingOverlay(central)
 
         root_layout = QVBoxLayout(central)
         root_layout.setContentsMargins(self._margin, self._margin, self._margin, self._margin)
@@ -745,6 +876,10 @@ class MainWindow(QMainWindow):
         self.btn_new.clicked.connect(self.new_project)
         self.btn_clear_params.clicked.connect(self.clear_all)
         self.btn_start.clicked.connect(self.start_writing)
+
+        # T2.5 — LoadingOverlay 取消按钮连线到 worker.cancel()
+        self.overlay.cancel_button.clicked.connect(self._on_cancel_overlay)
+
         self.btn_copy_result.clicked.connect(
             lambda: QApplication.clipboard().setText(self.result_view.toPlainText()))
         self.btn_export.clicked.connect(self.save_output)
@@ -835,6 +970,9 @@ class MainWindow(QMainWindow):
         self.title_edit.clear()
         self.result_view.clear()
         self.result_view.append("⏳ 正在准备改写任务…")
+
+        # T2.5 — 显示 LoadingOverlay（覆盖整个 central widget）
+        self.overlay.show_event(self.centralWidget(), "正在启动 AI 改写任务…")
 
         # 创建后台线程 — T1.8：复用持久化信号对象，先清理旧线程
         signals = self._signals
@@ -956,6 +1094,8 @@ class MainWindow(QMainWindow):
 
     def _on_rewrite_finished(self, title: str, body: str):
         """Worker 改写完成 → 更新 UI。"""
+        # T2.5 — 隐藏 LoadingOverlay
+        self.overlay.hide_event()
         self.title_edit.setText(title)
         self.result_view.setPlainText(body)
         self.btn_start.setEnabled(True)
@@ -964,13 +1104,25 @@ class MainWindow(QMainWindow):
 
     def _on_rewrite_error(self, error_msg: str):
         """Worker 改写出错 → 弹窗 + 状态栏。"""
+        # T2.5 — 隐藏 LoadingOverlay
+        self.overlay.hide_event()
         QMessageBox.critical(self, "改写失败", error_msg)
         self.btn_start.setEnabled(True)
         self.btn_start.setText("开始撰写")
         self._status.showMessage(f"改写失败: {error_msg}")
 
+    def _on_cancel_overlay(self):
+        """T2.5 — 用户点击 LoadingOverlay 上的取消按钮。"""
+        if self._worker:
+            self._worker.cancel()
+        self.overlay.hide_event()
+        self.btn_start.setEnabled(True)
+        self.btn_start.setText("开始撰写")
+
     def _on_thread_finished(self):
         """线程真正退出后，清空悬空引用，防止下次访问已删除的 C++ 对象。"""
+        # T2.5 — 安全网：确保 overlay 最终隐藏（即使 success/error 未调用）
+        self.overlay.hide_event()
         self._thread = None
         self._worker = None
 
