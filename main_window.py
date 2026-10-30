@@ -974,24 +974,29 @@ class MainWindow(QMainWindow):
         # T2.5 — 显示 LoadingOverlay（覆盖整个 central widget）
         self.overlay.show_event(self.centralWidget(), "正在启动 AI 改写任务…")
 
-        # 创建后台线程 — T1.8：复用持久化信号对象，先清理旧线程
+        # 创建后台线程 — T1.8/T2.6：复用持久化信号对象，始终先清理旧线程和旧连接
         signals = self._signals
 
+        if self._worker:
+            self._worker.cancel()
         if self._thread and self._thread.isRunning():
-            if self._worker:
-                self._worker.cancel()
             self._thread.wait(3000)
-            # 断开旧连接防止重复发射（忽略未连接的信号）
-            for sig_name in ("status", "progress", "finished", "error"):
-                try:
-                    getattr(self._signals, sig_name).disconnect()
-                except TypeError:
-                    pass
+        # T2.6：无论旧线程是运行中还是已完成，都必须断开所有旧信号连接
+        # 否则第二次运行时 _signals.finished / .error 会同时触发新旧回调 → 段错误
+        for sig_name in ("status", "progress", "finished", "error"):
+            try:
+                getattr(signals, sig_name).disconnect()
+            except TypeError:
+                pass
 
         signals.status.connect(lambda msg: self._status.showMessage(msg))
         signals.progress.connect(self._on_progress)
         signals.finished.connect(self._on_rewrite_finished)
         signals.error.connect(self._on_rewrite_error)
+
+        # T2.6：如果旧线程对象还在，安全删除它（防止 QThread: Destroyed while running）
+        if self._thread is not None:
+            self._thread.deleteLater()
 
         self._thread = QThread()
         self._worker = RewriteWorker(source_type, source_value, config, signals)
