@@ -78,3 +78,9 @@ python main.py
 ```
 
 The application includes built-in console logging with DEBUG-level controls. See [docs/DEBUG_LOG_GUIDE.md](docs/DEBUG_LOG_GUIDE.md) for detailed logging instructions.
+
+### current status
+- [x] **User Interface:** Initial UI layout and basic interactive controls implemented
+- [x] **End-to-End Pipeline:** Rewriting pipeline for input texts settled
+- [ ] **Core Editing Features:** Expanding text processing capabilities, prompt templates, and stability optimizations *(In Progress)*
+- [ ] **UI/UX Refinement:** Improving responsiveness, streaming text rendering, and visual layout *(Planned)*
