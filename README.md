@@ -1,6 +1,6 @@
 # Reword
 
-An intelligent article rewriting tool powered by local AI. Extracts content from webpages, plain text, or PDF files, then rewrites it using a local Ollama model, with extensive controls for the output style.
+An intelligent article rewriting tool powered by AI. Extracts content from webpages, plain text, or PDF files, then rewrites it using a local Ollama model, with extensive controls for the output style.
 
 ## ✨ Features
 
