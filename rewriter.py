@@ -66,7 +66,16 @@ def build_prompt(original_text: str, config: dict) -> str:
     forbid_new_facts = config.get("forbid_new_facts", True)
     special_remarks = config.get("special_remarks", "")
 
-    prompt = f"""你是一个专业改写助手。
+    # ── 最高优先级指令（如果有）放在 prompt 最开头 ──
+    priority_block = ""
+    if special_remarks.strip():
+        priority_block = (
+            "⚠️ 【最高优先级用户指令】\n"
+            f"{special_remarks}\n\n"
+            "以上为本次改写的最高优先级要求，必须严格遵守。即使与以下通用规则冲突，也优先遵循本条指令。\n\n"
+        )
+
+    prompt = f"""{priority_block}你是一个专业改写助手。
 
 任务：
 根据输入原文，改写为{style_cn}风格，面向{audience_cn}的文章，该文章用于{scene_cn}。
@@ -80,7 +89,6 @@ def build_prompt(original_text: str, config: dict) -> str:
 6. 输出语言为{lang_cn}。
 7. {"必须同时输出标题和正文。" if auto_title else "只输出正文，不要生成标题。"}
 8. 可以适当补充过渡句以保证行文流畅。
-{"9. " + special_remarks if special_remarks.strip() else ""}
 
 风格约束：
 - 语言风格为{TONE_LABELS.get(tone, tone)}
@@ -98,9 +106,23 @@ def build_prompt(original_text: str, config: dict) -> str:
 
     prompt += f"\n{'='*40}\n\n[以下是要改写的原文]\n\n{original_text}"
     
-    # 附加用户自定义要求（最高优先级）
+
+    # 末尾再次强调最高优先级指令（如果有）
     if special_remarks.strip():
-        prompt += f"\n\n[以上为原文。请根据上述全部约束进行改写，特别注意用户的要求：{special_remarks}]"
+        prompt += (
+            f"\n\n⚠️【重申最高优先级用户指令】\n"
+            f"{special_remarks}\n\n"
+            "请严格以上述要求为准进行改写。"
+        )
+
+    # ── 记录最终发送给 AI 的完整 prompt（调试用） ──
+    logger.debug("=" * 60)
+    logger.debug("[Rewriter] 最终发送的 Prompt (长度: %d 字):", len(prompt))
+    logger.debug("=" * 60)
+    chunk_size = 2000
+    for _i in range(0, len(prompt), chunk_size):
+        logger.debug("--- prompt[%d:%d] ---\n%s", _i, _i + chunk_size, prompt[_i:_i + chunk_size])
+
 
     return prompt
 

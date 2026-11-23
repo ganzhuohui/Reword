@@ -8,9 +8,9 @@ proj-publisher — 入口点
 import sys
 import logging
 
-# 配置基础日志（控制台输出）
+# 配置基础日志（控制台输出）— DEBUG 级别可查看完整 prompt
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%H:%M:%S",
 )

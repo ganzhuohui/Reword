@@ -8,6 +8,8 @@ proj-publisher — 后台工作线程
 from __future__ import annotations
 
 import logging
+import os
+import threading
 import time
 from PySide6.QtCore import QObject, Signal
 
@@ -26,6 +28,7 @@ class WorkerSignals(QObject):
     finished = Signal(str, str)       # 成功：(title, body) 改写后的标题和正文
     error = Signal(str)              # 错误信息
     cancelled = Signal()             # 用户取消完成
+    prompt_ready = Signal(str)       # 发送 AI 前的完整 prompt，供 UI 展示
 
 
 # ---------------------------------------------------------------------------
@@ -74,15 +77,30 @@ class RewriteWorker(QObject):
         import content_extractor as ce
         import rewriter as rw
 
+        logger.info(
+            ">>> [WORKER] run() entered | thread_id=%s | pid=%d",
+            threading.current_thread().name, os.getpid(),
+        )
+
         try:
             # --- Step 1: 内容抽取 ---
+            logger.info(">>> [WORKER] Step 1: content extraction starting")
             self.signals.status.emit("正在提取原文…")
             self.signals.progress.emit(1, 3, "正在提取原文…")
 
+            logger.info(
+                ">>> [WORKER] Calling ce.extract() | type=%s | value_len=%d",
+                self.source_type, len(self.source_value),
+            )
             result = ce.extract(self.source_type, self.source_value)
+            logger.info(
+                ">>> [WORKER] ce.extract() returned | text_len=%d | title=%r",
+                len(result.extracted_text), result.source_title[:30] if result.source_title else None,
+            )
 
             if not result.extracted_text.strip():
                 self.signals.error.emit("提取到的内容为空，请检查输入源。")
+                logger.info(">>> [WORKER] error emitted: empty content")
                 return
 
             original_text = result.extracted_text
@@ -107,6 +125,10 @@ class RewriteWorker(QObject):
 
                 collected_text.append(chunk_text)
                 self.signals.chunk.emit(chunk_text)
+                logger.debug(
+                    ">>> [WORKER] _on_chunk received | chunk_len=%d | total_chunks=%d",
+                    len(chunk_text), len(collected_text),
+                )
 
                 # 心跳提示（每 heartbeat_interval 秒更新一次状态栏）
                 now = time.time()
@@ -139,8 +161,21 @@ class RewriteWorker(QObject):
             self.signals.status.emit("正在调用AI模型，请耐心等候…")
             self.signals.progress.emit(2, 3, "正在调用AI模型…")
 
-            rewritten = rw.rewrite_content_streaming(
-                original_text, self.config, chunk_callback=streaming_callback
+            # T2.7 — 构建 prompt 并发送给 UI 展示（避免重复构造）
+            logger.info(">>> [WORKER] Building prompt and emitting to UI")
+            full_prompt = rw.build_prompt(original_text, self.config)
+            self.signals.prompt_ready.emit(full_prompt)
+
+            logger.info(
+                ">>> [WORKER] Calling rw.call_ollama_streaming() | model=%s",
+                self.config.get("model_name", "unknown"),
+            )
+            rewritten = rw.call_ollama_streaming(
+                full_prompt, chunk_callback=streaming_callback
+            )
+            logger.info(
+                ">>> [WORKER] call_ollama_streaming returned | rewritten_len=%d",
+                len(rewritten),
             )
 
             elapsed_total = int(time.time() - t0)
@@ -155,8 +190,6 @@ class RewriteWorker(QObject):
             self.signals.status.emit(f"改写完成（耗时 {elapsed_total} 秒）。")
 
             # --- Step 3: 分离标题与正文 ---
-            title = ""
-            body = rewritten
             lines = rewritten.strip().split("\n", 1)
             if lines:
                 first_line = lines[0].strip()

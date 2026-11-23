@@ -10,7 +10,7 @@ from __future__ import annotations
 import sys
 import logging
 
-from PySide6.QtCore import Qt, QThread, QTimer, QEasingCurve, QPropertyAnimation, QPoint
+from PySide6.QtCore import Qt, QThread, QEasingCurve, QPropertyAnimation, QPoint, QObject
 from PySide6.QtWidgets import QSizePolicy, QMessageBox, QGraphicsDropShadowEffect
 from PySide6.QtGui import QFont, QFontMetrics, QGuiApplication, QPalette, QColor
 
@@ -88,131 +88,6 @@ def _map_language(display_text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# LoadingOverlay — 半透明加载面板（旋转动画 + 状态 + 计时器 + 取消按钮）
-# ---------------------------------------------------------------------------
-
-class LoadingOverlay(QWidget):
-    """
-    半透明悬浮面板，覆盖在目标 widget 上方。
-
-    包含：
-      - Unicode spinner 旋转动画 (⠋⠙⠹⠸⠼⠴⠦⠧)
-      - 状态文本（实时更新）
-      - 计时器显示已等待秒数
-      - 取消按钮
-    """
-
-    SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧")
-
-    def __init__(self, parent: QWidget):
-        super().__init__(parent)
-        self._setup_ui()
-        self._timer = QTimer(self)
-        self._timer.timeout.connect(self._on_timer_tick)
-        self._spinner_index = 0
-        self._seconds = 0
-
-    def _setup_ui(self):
-        self.setStyleSheet(
-            "background-color: rgba(0, 0, 0, 150);"
-            "border-radius: 8px;"
-        )
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-
-        layout = QVBoxLayout(self)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        # --- Spinner + 状态文本行 ---
-        top_row = QHBoxLayout()
-        top_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self.spinner_label = QLabel("⠋")
-        self.spinner_label.setFont(QFont("Noto Sans", 24))
-        self.spinner_label.setStyleSheet("color: #60A5FA; background: transparent;")
-        top_row.addWidget(self.spinner_label)
-
-        self.status_label = QLabel("正在加载…")
-        self.status_label.setFont(QFont("Noto Sans", 14))
-        self.status_label.setStyleSheet("color: #E5E7EB; background: transparent;")
-        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        top_row.addWidget(self.status_label)
-
-        layout.addLayout(top_row)
-
-        # --- 计时器行 ---
-        timer_row = QHBoxLayout()
-        timer_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.timer_label = QLabel("已等待 0 秒")
-        self.timer_label.setFont(QFont("Noto Sans", 12))
-        self.timer_label.setStyleSheet("color: #9CA3AF; background: transparent;")
-        timer_row.addWidget(self.timer_label)
-        layout.addLayout(timer_row)
-
-        # --- 提示文本 ---
-        hint = QLabel("AI 首次加载模型可能需要较长时间，请耐心等待…")
-        hint.setFont(QFont("Noto Sans", 10))
-        hint.setStyleSheet("color: #6B7280; background: transparent;")
-        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(hint)
-
-        # --- 取消按钮 ---
-        self.cancel_button = QPushButton("✕  取消任务")
-        self.cancel_button.setFont(QFont("Noto Sans", 13))
-        self.cancel_button.setFixedSize(140, 42)
-        self.cancel_button.setStyleSheet(
-            "QPushButton {"
-            "   background-color: #EF4444;"
-            "   color: white;"
-            "   border-radius: 8px;"
-            "   padding: 6px 16px;"
-            "}"
-            "QPushButton:hover {"
-            "   background-color: #DC2626;"
-            "}"
-            "QPushButton:pressed {"
-            "   background-color: #B91C1C;"
-            "}"
-        )
-        btn_row = QHBoxLayout()
-        btn_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        btn_row.addWidget(self.cancel_button)
-        layout.addLayout(btn_row)
-
-        layout.setContentsMargins(40, 30, 40, 30)
-
-    def _on_timer_tick(self):
-        self._seconds += 1
-        self.timer_label.setText(f"已等待 {self._seconds} 秒")
-        self._spinner_index = (self._spinner_index + 1) % len(self.SPINNER_FRAMES)
-        self.spinner_label.setText(self.SPINNER_FRAMES[self._spinner_index])
-
-    def show_event(self, parent_widget: QWidget, message: str = "正在加载…"):
-        """显示在父控件中央，调整大小适应内容。"""
-        self.status_label.setText(message)
-        self._seconds = 0
-        self._spinner_index = 0
-        self.spinner_label.setText(self.SPINNER_FRAMES[0])
-        self.timer_label.setText("已等待 0 秒")
-
-        geo = parent_widget.geometry()
-        w, h = int(geo.width() * 0.55), int(geo.height() * 0.6)
-        x, y = (geo.width() - w) // 2, (geo.height() - h) // 2
-        self.setGeometry(x, y, w, h)
-
-        self.raise_()
-        self.show()
-        self._timer.start(100)
-
-    def hide_event(self):
-        """隐藏面板，停止定时器。"""
-        self._timer.stop()
-        self.hide()
-
-    def set_message(self, message: str):
-        """更新状态文本。"""
-        self.status_label.setText(message)
-
 
 # ---------------------------------------------------------------------------
 # APP_STYLE — 全局样式表
@@ -368,8 +243,23 @@ class MainWindow(QMainWindow):
         # T1.8 — 持久化 WorkerSignals，防止被 GC 回收导致段错误 / AttributeError
         # ------------------------------------------------------------------
         self._signals = WorkerSignals()
+
+        # T2.8 — 信号连接一次性完成（__init__），避免运行时反复 disconnect/connect
+        # 导致 RuntimeWarning 与竞态条件。_signals 对象随 MainWindow 生命周期共存。
+        self._signals.status.connect(lambda msg: self._status.showMessage(msg))
+        self._signals.progress.connect(self._on_progress)
+        self._signals.finished.connect(self._on_rewrite_finished)
+        self._signals.error.connect(self._on_rewrite_error)
+        self._signals.prompt_ready.connect(self._on_prompt_ready)
+        self._signals.chunk.connect(self._on_chunk)            # 流式 chunk → UI 实时更新
+
         self._thread: QThread | None = None            # 后台线程引用
         self._worker: RewriteWorker | None = None       # 工作器引用（用于 cancel）
+
+        # T3.0 — 线程身份标记：用于 _on_thread_finished 中区分新旧回调。
+        #         id() 是 Python 对象内存地址，同一 QThread 实例在生命周期内不变；
+        #         旧线程的 queued finished 回调到达时无法匹配 → 安全跳过。
+        self._active_thread_id: int | None = None
 
         self.setWindowTitle("文章改写工具")
         self.resize(1280, 720)
@@ -388,9 +278,6 @@ class MainWindow(QMainWindow):
 
         central = QWidget()
         self.setCentralWidget(central)
-
-        # T2.5 — LoadingOverlay 实例（父为 central widget，覆盖在顶层）
-        self.overlay = LoadingOverlay(central)
 
         root_layout = QVBoxLayout(central)
         root_layout.setContentsMargins(self._margin, self._margin, self._margin, self._margin)
@@ -819,6 +706,19 @@ class MainWindow(QMainWindow):
         diff_layout.addWidget(left_splitter, stretch=1)
         self.tabs.addTab(diff_widget, "对照视图")
 
+        # T2.10 Tab 3: Prompt 预览（展示发送给 AI 的完整提示词）
+        tab3_widget = QWidget()
+        tab3_layout = QVBoxLayout(tab3_widget)
+        tab3_layout.setContentsMargins(0, 0, 0, 0)
+        tab3_layout.setSpacing(8)
+        self.prompt_view = QTextEdit()
+        self.prompt_view.setReadOnly(True)
+        self.prompt_view.setPlaceholderText("AI 使用的完整提示词将在此显示…")
+        prompt_font = QFont("Noto Sans Mono", 9)
+        self.prompt_view.setFont(prompt_font)
+        tab3_layout.addWidget(self.prompt_view, stretch=1)
+        self.tabs.addTab(tab3_widget, "Prompt 预览")
+
         root_layout.addWidget(self.tabs, stretch=1)
 
         return container
@@ -843,6 +743,26 @@ class MainWindow(QMainWindow):
         self.btn_start = QPushButton("开始写作")
         self.btn_start.setObjectName("primaryButton")
 
+        self.btn_cancel = QPushButton("取消任务")
+        self.btn_cancel.setObjectName("dangerButton")
+        self.btn_cancel.setEnabled(False)
+        # 红色样式
+        self.btn_cancel.setStyleSheet(
+            "QPushButton {"
+            "   background-color: #EF4444;"
+            "   color: white;"
+            "   border-radius: 6px;"
+            "   padding: 4px 12px;"
+            "}"
+            "QPushButton:hover {"
+            "   background-color: #DC2626;"
+            "}"
+            "QPushButton:disabled {"
+            "   background-color: #D1D5DB;"
+            "   color: #9CA3AF;"
+            "}"
+        )
+
         self.btn_copy_result = QPushButton("复制结果")
         self.btn_copy_result.setObjectName("primaryButton")
 
@@ -864,6 +784,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.btn_clear_params, stretch=0)
         
         layout.addWidget(self.btn_start, stretch=0)
+        layout.addWidget(self.btn_cancel, stretch=0)
         layout.addStretch(1)
         layout.addStretch(1)
         layout.addWidget(self.btn_copy_result, stretch=0)
@@ -877,8 +798,8 @@ class MainWindow(QMainWindow):
         self.btn_clear_params.clicked.connect(self.clear_all)
         self.btn_start.clicked.connect(self.start_writing)
 
-        # T2.5 — LoadingOverlay 取消按钮连线到 worker.cancel()
-        self.overlay.cancel_button.clicked.connect(self._on_cancel_overlay)
+        # 取消任务按钮连线
+        self.btn_cancel.clicked.connect(self._on_cancel_task)
 
         self.btn_copy_result.clicked.connect(
             lambda: QApplication.clipboard().setText(self.result_view.toPlainText()))
@@ -952,62 +873,57 @@ class MainWindow(QMainWindow):
 
     def start_writing(self):
         """点击「开始撰写」→ 内容提取 → AI 改写（后台线程）。"""
+        logger.info(">>> [DEBUG] start_writing called")
         config = self.collect_parameters()
         source_type, source_value = self._get_source_info()
+        logger.info(f">>> [DEBUG] source_type={source_type}, source_value_len={len(source_value)}")
 
         if not source_value:
             QMessageBox.warning(
                 self, "缺少输入",
                 "请先选择输入源（网页 URL / PDF 文件）或在文本框中粘贴原文。",
             )
+            logger.info(">>> [DEBUG] aborted: no source value")
             return
 
-        # 禁用按钮防止重复点击
+        # 禁用开始按钮、启用取消按钮
         self.btn_start.setEnabled(False)
         self.btn_start.setText("改写中…")
+        self.btn_cancel.setEnabled(True)
 
         # 清空结果区并显示加载状态
         self.title_edit.clear()
         self.result_view.clear()
         self.result_view.append("⏳ 正在准备改写任务…")
 
-        # T2.5 — 显示 LoadingOverlay（覆盖整个 central widget）
-        self.overlay.show_event(self.centralWidget(), "正在启动 AI 改写任务…")
-
-        # 创建后台线程 — T1.8/T2.6：复用持久化信号对象，始终先清理旧线程和旧连接
-        signals = self._signals
-
+        # ── T2.9 线程安全清理 ────────────────────────────────────────
+        # 如果已有 worker 在运行，请求取消；旧线程会在自然退出后由
+        # _on_thread_finished（含 T3.0 身份校验）自动清理引用。
         if self._worker:
             self._worker.cancel()
         if self._thread and self._thread.isRunning():
             self._thread.wait(3000)
-        # T2.6：无论旧线程是运行中还是已完成，都必须断开所有旧信号连接
-        # 否则第二次运行时 _signals.finished / .error 会同时触发新旧回调 → 段错误
-        for sig_name in ("status", "progress", "finished", "error"):
-            try:
-                getattr(signals, sig_name).disconnect()
-            except TypeError:
-                pass
 
-        signals.status.connect(lambda msg: self._status.showMessage(msg))
-        signals.progress.connect(self._on_progress)
-        signals.finished.connect(self._on_rewrite_finished)
-        signals.error.connect(self._on_rewrite_error)
+        signals = self._signals
+        logger.info(f">>> [DEBUG] signals object id={id(signals)}")
 
-        # T2.6：如果旧线程对象还在，安全删除它（防止 QThread: Destroyed while running）
-        if self._thread is not None:
-            self._thread.deleteLater()
-
+        # 创建新线程和 worker（信号已在 __init__ 中一次性连接，无需重复操作）
         self._thread = QThread()
+        self._active_thread_id = id(self._thread)   # T3.0 — 标记当前有效线程身份
         self._worker = RewriteWorker(source_type, source_value, config, signals)
+        logger.info(f">>> [DEBUG] worker created: {id(self._worker)}")
         self._worker.moveToThread(self._thread)
 
-        # 线程完成 / 错误后自动清理（通过 thread.finished → _on_thread_finished）
-        self._thread.started.connect(self._worker.run)
-        self._thread.finished.connect(self._worker.deleteLater)
+        # 使用 lambda 连接 started/finished，避免跨线程 connect 的隐患：
+        # - lambda 捕获当前 worker 对象引用（闭包），不依赖 QMetaObject 方法查找
+        # - 每次创建新 thread/worker 时都是全新的 lambda → 不会产生重复连接
+        self._thread.started.connect(lambda: self._worker.run())
+        self._thread.finished.connect(lambda w=self._worker: w.deleteLater())
         self._thread.finished.connect(self._on_thread_finished)
 
+        logger.info(">>> [DEBUG] calling _thread.start()")
         self._thread.start()
+        logger.info(f">>> [DEBUG] thread started, isRunning={self._thread.isRunning()}")
 
     def save_output(self):
         """保存输出到本地（根据 TXT/DOCX 单选按钮选择默认格式）。"""
@@ -1065,6 +981,7 @@ class MainWindow(QMainWindow):
         self.result_view.clear()
         self.orig_view.clear()
         self.gen_view.clear()
+        self.prompt_view.clear()
 
     def _get_input_text(self) -> str:
         """从当前选中的输入模式获取文本。"""
@@ -1099,42 +1016,109 @@ class MainWindow(QMainWindow):
 
     def _on_rewrite_finished(self, title: str, body: str):
         """Worker 改写完成 → 更新 UI。"""
-        # T2.5 — 隐藏 LoadingOverlay
-        self.overlay.hide_event()
+        logger.info(
+            ">>> [SIGNAL] _on_rewrite_finished called | "
+            "title_len=%d | body_len=%d",
+            len(title), len(body),
+        )
         self.title_edit.setText(title)
+        # Tab 1: 结果预览 — 用完整正文覆盖流式写入的内容
         self.result_view.setPlainText(body)
+        # Tab 2: 对照视图 — 右侧显示改写结果
+        self.gen_view.setPlainText(body)
+        # Tab 2: 原文填充（如果尚未设置）
+        if not self.orig_view.toPlainText():
+            orig = self._get_input_text()
+            self.orig_view.setPlainText(orig)
         self.btn_start.setEnabled(True)
         self.btn_start.setText("开始撰写")
+        self.btn_cancel.setEnabled(False)
         self._status.showMessage(f"改写完成 — {len(body)} 字", 5000)
+        logger.info(
+            ">>> [SIGNAL] _on_rewrite_finished UI updated: btn_start enabled, cancel disabled"
+        )
 
     def _on_rewrite_error(self, error_msg: str):
         """Worker 改写出错 → 弹窗 + 状态栏。"""
-        # T2.5 — 隐藏 LoadingOverlay
-        self.overlay.hide_event()
+        logger.warning(
+            ">>> [SIGNAL] _on_rewrite_error called | msg=%r", error_msg
+        )
         QMessageBox.critical(self, "改写失败", error_msg)
         self.btn_start.setEnabled(True)
         self.btn_start.setText("开始撰写")
+        self.btn_cancel.setEnabled(False)
         self._status.showMessage(f"改写失败: {error_msg}")
 
-    def _on_cancel_overlay(self):
-        """T2.5 — 用户点击 LoadingOverlay 上的取消按钮。"""
+    def _on_cancel_task(self):
+        """用户点击取消任务按钮。"""
+        logger.info(
+            ">>> [CANCEL] _on_cancel_task called | _worker=%s",
+            self._worker is not None,
+        )
         if self._worker:
             self._worker.cancel()
-        self.overlay.hide_event()
         self.btn_start.setEnabled(True)
         self.btn_start.setText("开始撰写")
+        self.btn_cancel.setEnabled(False)
 
     def _on_thread_finished(self):
-        """线程真正退出后，清空悬空引用，防止下次访问已删除的 C++ 对象。"""
-        # T2.5 — 安全网：确保 overlay 最终隐藏（即使 success/error 未调用）
-        self.overlay.hide_event()
+        """线程真正退出后，清空悬空引用，防止下次访问已删除的 C++ 对象。
+
+        T3.0 — 通过 QObject.sender() 获取触发此回调的 QThread 实例，
+        对比 _active_thread_id 判断是否来自当前有效线程。
+        旧线程排队的 finished 回调到达时 sender 身份不匹配 → 安全跳过。
+
+        start_writing() 中不再提前置空 _thread/_worker（避免在 running 状态下
+        调用 deleteLater 导致段错误）。此回调是清理引用的唯一入口，确保线程已退出。
+        """
+        logger.info(
+            ">>> [THREAD] _on_thread_finished called | sender=%s",
+            QObject.sender(self),
+        )
+        # T3.0 — 身份验证：只接受来自当前有效线程的 finished 回调
+        sender = QObject.sender(self)
+        if sender is None or id(sender) != self._active_thread_id:
+            # 旧回调或无效信号，安全跳过 — 防止竞态下误删新线程/worker 引用
+            logger.info(
+                ">>> [THREAD] _on_thread_finished skipped (stale callback) | "
+                "sender=%s | expected_id=%s",
+                sender, self._active_thread_id,
+            )
+            return
+
+        logger.info(
+            ">>> [THREAD] _on_thread_finished clearing references"
+        )
         self._thread = None
         self._worker = None
+        self._active_thread_id = None
 
     def _on_progress(self, step: int, max_steps: int, message: str):
         """Worker 进度更新（可选）。"""
         pct = int(100 * step / max(max_steps, 1)) if max_steps else 0
+        logger.debug(
+            ">>> [SIGNAL] _on_progress | step=%d/%d (%d%%) | msg=%r",
+            step, max_steps, pct, message,
+        )
         self.result_view.append(f"[{pct}%] {message}")
+
+    def _on_prompt_ready(self, prompt: str):
+        """接收构建好的 AI prompt，展示到「Prompt 预览」标签页。"""
+        logger.debug(
+            ">>> [SIGNAL] _on_prompt_ready | prompt_len=%d", len(prompt)
+        )
+        self.prompt_view.setPlainText(prompt)
+
+    def _on_chunk(self, chunk_text: str):
+        """接收流式输出的文本片段，实时更新到 UI。"""
+        logger.debug(">>> [SIGNAL] _on_chunk | len=%d", len(chunk_text))
+        # 追加到结果预览 (Tab 1) 和对照视图 (Tab 2)
+        self.result_view.moveCursor(QTextCursor.MoveOperation.End)
+        cursor = self.result_view.textCursor()
+        cursor.insertText(chunk_text)
+        self.gen_view.moveCursor(QTextCursor.MoveOperation.End)
+        cursor2 = self.gen_view.textCursor()
+        cursor2.insertText(chunk_text)
 
     # -----------------------------------------------------------------------
     # T1.7 — 参数收集方法（供 Phase-2 Prompt 拼接使用）
